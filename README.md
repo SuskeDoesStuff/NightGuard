@@ -9,10 +9,10 @@ information and one of its costliest actions.
 
 ## Status
 
-**v0.1 — Skeleton.** Pure simulation core only: clock, power model, the five office controls, and the
-two door entities (`DRIFTER`, `PROWLER`). Blackout is a placeholder that terminates immediately. No
-Gymnasium wrapper, no trace format, no observations, no reward. The deliverable is a `NightSim` you
-drive with a list of actions.
+**v0.2 — Full roster.** All four entities (`WARDEN`, `DRIFTER`, `PROWLER`, `SPRINTER`), the JSONL
+trace format, the audio channel, and the scripted reference policies. Blackout is still a
+placeholder that terminates immediately; the three-phase sequence lands in v0.3. No Gymnasium
+wrapper, no observations, no reward — `env/actions.py` is the only `env/` code.
 
 ## Install
 
@@ -44,13 +44,16 @@ print(result.cause, result.final_power_pct, sim.clock.decision_steps)
 | Types | `mypy --strict src/nightguard/core src/nightguard/env` |
 | Validate | `python scripts/validate.py` |
 
-`validate.py` checks the v0.1 exit criteria from `PROJECT.md` §7.
+`validate.py` checks the v0.1 and v0.2 exit criteria from `PROJECT.md` §7, printing each
+measured value alongside its target.
 
 ## Layout
 
 ```
-src/nightguard/core/   Pure simulation. No gymnasium, no torch, no global randomness.
-src/nightguard/env/    Gymnasium wrapper. Empty until v1.0.
-configs/               Topology, night presets, and run presets. All numeric constants live here.
-scripts/               Exit-criteria validation and episode runners.
+src/nightguard/core/       Pure simulation. No gymnasium, no torch, no global randomness.
+src/nightguard/trace/      JSONL serialisation of ground truth. Depends on core only.
+src/nightguard/policies/   Scripted reference policies: do_nothing, rhythm, monitor_down.
+src/nightguard/env/        Gymnasium layer. Only the action space until v1.0.
+configs/                   Topology and night presets. All numeric constants live here.
+scripts/                   Exit-criteria validation.
 ```

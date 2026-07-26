@@ -245,6 +245,24 @@ class AudioState:
         self.running = False
         self.bang = False
 
+    def clear(self) -> None:
+        """Clear every signal."""
+        self.clear_events()
+        self.kitchen = False
+
+    def absorb(self, other: AudioState) -> None:
+        """OR another tick's signals into this one.
+
+        PROJECT.md 3.9 emits audio "for the decision step in which the triggering event occurred",
+        but a tick is a fifth of a decision step. The per-tick flags feed the trace; this
+        accumulates them so a single-tick cue such as `footstep` or `bang` is still audible to the
+        agent at the end of the step in which it fired.
+        """
+        self.footstep |= other.footstep
+        self.kitchen |= other.kitchen
+        self.running |= other.running
+        self.bang |= other.bang
+
 
 @dataclass
 class SimState:
@@ -263,6 +281,7 @@ class SimState:
     prowler: DoorEntityState
     sprinter: SprinterState
     audio: AudioState = field(default_factory=AudioState)
+    step_audio: AudioState = field(default_factory=AudioState)
     prev_monitor_up: bool = False
     escalations_applied: int = 0
     blackout: bool = False

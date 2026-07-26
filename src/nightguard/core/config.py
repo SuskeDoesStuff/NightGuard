@@ -245,6 +245,19 @@ class AudioConfig:
 
 
 @dataclass(frozen=True)
+class TraceConfig:
+    """Trace emission. PROJECT.md 5.
+
+    ``cam_duty_window_steps`` is 5's "fraction of the last 100 decision steps with the monitor
+    up"; ``stride`` subsamples tick records for long batch runs, where 5 sim ticks per record is
+    one record per decision step.
+    """
+
+    cam_duty_window_steps: int = 100
+    stride: int = 1
+
+
+@dataclass(frozen=True)
 class FlagsConfig:
     """Ablation flags. PROJECT.md 3.8 and 4."""
 
@@ -277,6 +290,7 @@ class NightConfig:
     office: OfficeConfig = OfficeConfig()
     blackout: BlackoutConfig = BlackoutConfig()
     audio: AudioConfig = AudioConfig()
+    trace: TraceConfig = TraceConfig()
     flags: FlagsConfig = FlagsConfig()
     reward: RewardConfig = RewardConfig()
 
@@ -570,6 +584,14 @@ def config_from_mapping(data: Mapping[str, Any], base: NightConfig | None = None
             footstep_nodes=_str_tuple(
                 _mapping(data, "audio"), "footstep_nodes", current.audio.footstep_nodes
             )
+        ),
+        trace=TraceConfig(
+            cam_duty_window_steps=_int(
+                _mapping(data, "trace"),
+                "cam_duty_window_steps",
+                current.trace.cam_duty_window_steps,
+            ),
+            stride=_int(_mapping(data, "trace"), "stride", current.trace.stride),
         ),
         flags=_parse_flags(_mapping(data, "flags"), current.flags),
         reward=_parse_reward(_mapping(data, "reward"), current.reward),

@@ -43,6 +43,45 @@ Code:
   bounds fail. `test_config.py` now asserts every timing constant in every shipped night config
   lands on the grid — that assertion is the durable part, not the value.
 
+### Entities, trace and policies
+
+`WARDEN` (§3.4) and `SPRINTER` (§3.7) are implemented, along with §5's trace format, §3.9's audio
+channel, and the reference policies §8.2 requires. `env/actions.py` is the only `env/` code, per
+§7's v0.2 scope.
+
+Two defects surfaced during the policy work, both of which had made a documented mechanic
+unreachable while every targeted test still passed:
+
+- **Monitor edges were resolved before the clock advanced,** so a SPRINTER attack triggered by
+  raising the monitor was stamped with the previous tick. Its grace period then expired exactly on
+  the next decision boundary, meaning the first step at which the agent could observe the `running`
+  cue was the step the attack resolved. §3.7's "0.5 s grace period during which closing `door_left`
+  still saves the agent" was unreachable on the monitor-raise path — only the 25 s forced-attack
+  path worked. Edges are now resolved after the clock advance, giving exactly one usable decision.
+- **Audio flags were per-tick, but §3.9 emits them per decision step.** A tick is a fifth of a
+  step, so single-tick cues (`footstep`, `bang`) were invisible to a policy unless they happened to
+  land on a step's last tick. State now carries both: per-tick flags for the trace, and a
+  step-level accumulation for observation.
+
+The first defect alone moved `rhythm` from 0.665/0.113/0.077/0/0/0 to 0.780/0.300/0.370/0.068/
+0.003/0 across nights 1–6.
+
+New config keys, all defaulted: `entities.*.enabled` (§8.3 requires running with "all other
+entities disabled" and there was no mechanism), `warden.office_kill_interval_s`, `warden.door`, an
+`audio.footstep_nodes` section, and a `trace` section carrying `cam_duty_window_steps` and
+`stride`.
+
+**§5's `event` field extended.** Several events genuinely co-occur on one tick — an invasion always
+jams its door on the same tick — but the field holds a single value, and taking the first silently
+dropped the invasion in favour of the jam. Co-occurring events now resolve by a fixed priority, and
+§5's list gained `warden_retreat`, `sprinter_armed`, `sprinter_attack` and `escalation_hour_<n>`,
+which the viewer wants as scrubber markers. `door_jam_*` consequently never appears alone.
+
+`rhythm` was tuned once and frozen: `peek_every_steps` swept over {10, 12, 14, 16, 20, 28} at 400
+seeds per night, with 12 dominating. The load-bearing detail is that it closes **both** doors before
+each scheduled peek — raising the monitor is exactly what lets a waiting entity in — and that the
+peek is not optional, because freezing SPRINTER is the only alternative to an escalating bang drain.
+
 ### §3.4 resolved: WARDEN's `E_CORNER` "attack" is a move
 
 §3.4 said WARDEN "attacks" when an opportunity succeeds at `E_CORNER` with the monitor up and a

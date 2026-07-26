@@ -118,9 +118,8 @@ nightguard/
 │   │   └── writer.py
 │   ├── policies/
 │   │   ├── __init__.py
-│   │   ├── do_nothing.py
-│   │   ├── random_policy.py
-│   │   └── rhythm.py          # hand-coded reference strategy
+│   │   ├── base.py            # Percept: what a human player can perceive
+│   │   └── reference.py       # do_nothing, random, rhythm, monitor_down
 │   ├── train/
 │   │   ├── ppo.py
 │   │   ├── recurrent_ppo.py
@@ -145,6 +144,7 @@ nightguard/
     ├── test_prowler.py
     ├── test_sprinter.py
     ├── test_escalation.py
+    ├── test_policies.py
     ├── test_trace.py
     ├── test_blackout.py
     ├── test_determinism.py
@@ -837,7 +837,21 @@ One JSONL file per episode. A header record, then one record per **sim tick**, t
   node. `metrics.cam_duty` is the fraction of the last 100 decision steps with the monitor up.
   Compute both at write time; do not make the viewer derive them.
 - `event` is `null` or one of `door_jam_left`, `door_jam_right`, `bang`, `invasion_<entity>`,
-  `blackout`, `warden_countdown_start`, `death_<entity>`.
+  `blackout`, `warden_countdown_start`, `warden_retreat`, `sprinter_armed`, `sprinter_attack`,
+  `death_<entity>`, `escalation_hour_<n>`.
+
+  Several events genuinely land on the same tick — an invasion always jams its door on the same
+  tick, and a death usually follows the event that caused it — but the field holds a single value.
+  Co-occurring events are resolved by a fixed priority (deaths, then blackout, then invasions, then
+  attacks, bangs, arming, WARDEN's moves, jams, escalation), so the viewer's scrubber marks the
+  most informative one. The complete per-tick list stays in core state for debugging. A consequence
+  worth knowing: `door_jam_left` and `door_jam_right` never appear on their own, because a jam is
+  always coincident with an invasion and a jammed door is already visible in the office panel.
+
+- `belief`, `policy` and `metrics.belief_error` are produced by `env/`, which does not exist until
+  v1.0. From v0.2 they are emitted as `null` with their keys present, so the shape is stable from
+  the first version that ships a trace. `metrics.cam_duty` is pure core state and is emitted.
+  `return` in the footer is likewise `null` until reward exists.
 
 **Footer:**
 

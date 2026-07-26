@@ -30,8 +30,8 @@ All four must pass before any milestone is called done. See PROJECT.md §11.
 | Version | Scope | Status |
 |---|---|---|
 | v0.1 | Clock, power, office controls, DRIFTER + PROWLER | **Done** — tag `v0.1`, commit `19362e1` |
-| v0.2 | WARDEN + SPRINTER, trace format | **Current** |
-| v0.3 | Three-phase blackout, full validation suite (§8) | Not started |
+| v0.2 | WARDEN + SPRINTER, trace format, audio, reference policies | **Done** — tag `v0.2` |
+| v0.3 | Three-phase blackout, full validation suite (§8) | **Current** |
 | v1.0 | Gymnasium wrapper, wrappers, vectorised runner | Not started |
 | v1.1 | RecurrentPPO baseline | Not started |
 | v1.2 | Replay viewer | Not started |
@@ -61,7 +61,9 @@ PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning.
 - **WARDEN's `E_CORNER` "attack" is a move into `OFFICE`, not a kill.** The kill is the 25%/s roll
   afterwards, while the monitor is down. Read as a kill, `OFFICE` is unreachable.
 - **§8.2's night-1 threshold is an agreement test**, not `≥ 0.8`: measured `do_nothing` survival
-  must match the analytic 0.2397 within binomial error. Nights 2–6 are near zero by design.
+  must match the analytic **0.2397** within binomial error (measured 0.2373 at n=10,000). Nights
+  2–6 are near zero by design, because SPRINTER is the only kill path for a monitor-down policy.
+- **`rhythm` is frozen.** Tuned once by sweep; do not retune it to chase a number.
 
 ## Traps
 
@@ -80,3 +82,9 @@ PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning.
   byte-identical trace check must assert distinct outcomes across seeds first (§8.0).
 - **The §7 idle-power table is rounded to 3 dp** and is display only. The closed form
   `(0.1 + 0.1/D) × 535` is normative; nights 1, 2, 5 and 6 differ by 8e-5 to 3e-4.
+- **Order the tick by §3.13 and check what a timer is stamped with.** Two v0.2 bugs came from
+  this: monitor edges resolved before the clock advance stamped SPRINTER's attack with the previous
+  tick and erased its whole grace period, and per-tick audio hid single-tick cues from a policy
+  that only observes at decision boundaries. Both passed every targeted test.
+- **Tests that measure the power or AI subsystems must disable the roster** (`entities.*.enabled`).
+  Otherwise SPRINTER ends the night before dawn and the measurement silently changes meaning.

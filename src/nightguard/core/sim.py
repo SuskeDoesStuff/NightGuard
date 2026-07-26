@@ -11,7 +11,7 @@ consequence at all, making the door mechanic untestable. See CHANGELOG.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -117,6 +117,8 @@ class NightSim:
         self._invasion_timeout_ticks = self.clock.to_ticks(
             config.office.invasion_kill_timeout_s, "invasion_kill_timeout_s"
         )
+        # PROJECT.md 3.13 step 9. Set by trace/ or any other consumer; core never calls into it.
+        self.on_tick: Callable[[SimState, Action | None], None] | None = None
         self.state = self._initial_state()
 
     @classmethod
@@ -185,6 +187,9 @@ class NightSim:
             raise RuntimeError("cannot step a terminated episode")
 
         resolved = Action(int(action))
+        # PROJECT.md 3.9: audio is emitted for the decision step in which the event occurred, so
+        # the step-level signals accumulate across this step's ticks and reset with it.
+        self.state.step_audio.clear()
         for offset in range(self.clock.ticks_per_decision_step):
             self._advance_tick(resolved if offset == 0 else None)
             if self.state.terminated:
@@ -223,7 +228,17 @@ class NightSim:
     # --- the transition function ---------------------------------------------------------------
 
     def _advance_tick(self, action: Action | None) -> None:
-        """One sim tick, in the fixed order of PROJECT.md 3.13."""
+        """One sim tick, then PROJECT.md 3.13 step 9: emit the trace record.
+
+        The observer is a plain callback so that ``trace/`` depends on ``core/`` and never the
+        reverse (PROJECT.md 1). It fires on every tick including the terminating one.
+        """
+        self._tick_body(action)
+        if self.on_tick is not None:
+            self.on_tick(self.state, action)
+
+    def _tick_body(self, action: Action | None) -> None:
+        """One sim tick, in the fixed order of PROJECT.md 3.13 steps 1-8."""
         state = self.state
 
         state.audio.clear_events()
@@ -231,11 +246,16 @@ class NightSim:
         # 1. Apply the agent's action (decision-step boundaries only).
         if action is not None:
             self._apply_action(action)
-        self._resolve_monitor_transition()
 
         # 2. Advance the clock; escalate if an hour boundary was crossed.
         state.tick += 1
         self._apply_escalation(state.tick)
+
+        # Monitor edges are resolved *after* the clock advance so that the timers they start are
+        # stamped with the tick they actually occur on. Stamping them with the previous tick made
+        # SPRINTER's grace period expire exactly on the next decision boundary, leaving the agent
+        # no step in which to close the door — the 0.5 s reaction window 3.7 specifies.
+        self._resolve_monitor_transition()
 
         # 3. Drain power; enter blackout at zero.
         active = power.active_units(state.office, self.config.power)
@@ -258,6 +278,7 @@ class NightSim:
         # 7. Resolve pending kills.
         self._resolve_pending_kills()
         self._update_state_audio()
+        state.step_audio.absorb(state.audio)
         if state.terminated:
             return
 
