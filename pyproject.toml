@@ -7,7 +7,9 @@ name = "nightguard"
 version = "0.1.0"
 description = "A partially-observable RL environment for asymmetric surveillance-and-resource management."
 readme = "README.md"
-requires-python = ">=3.11"
+# 3.12 floor: numpy's type stubs use `type` statements that only parse under 3.12, so
+# `mypy --strict` cannot actually be run at 3.11. See PROJECT.md 1.2.
+requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.24",
     "gymnasium>=0.29",

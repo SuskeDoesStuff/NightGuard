@@ -1,7 +1,0 @@
-# Smoke-run preset for v0.1. Drives scripts/validate.py and quick manual runs.
-# Not a night config: it selects one and says how to exercise it.
-
-night: 1
-seed: 918442
-episodes: 32
-policy: do_nothing

@@ -53,8 +53,7 @@ def test_hour_at_rejects_negative_time(clock: Clock) -> None:
 
 
 def test_interior_boundaries_are_the_escalation_points(clock: Clock) -> None:
-    interior = [tick for tick in range(clock.total_ticks + 1) if clock.is_hour_boundary(tick)]
-    assert interior == [900, 1790, 2680, 3570, 4460]
+    assert list(clock.hour_boundary_ticks[1:-1]) == [900, 1790, 2680, 3570, 4460]
 
 
 def test_seconds_convert_to_ticks_by_rounding_up(clock: Clock) -> None:
@@ -64,9 +63,19 @@ def test_seconds_convert_to_ticks_by_rounding_up(clock: Clock) -> None:
     assert clock.to_ticks(30.0) == 300
 
 
+def test_units_convert_by_integer_multiplication(clock: Clock) -> None:
+    """Multiplying by an integer count avoids the reciprocal of 1/300, which has no decimal form."""
+    assert clock.time_units_per_second == 300
+    assert clock.units_per_tick == 30
+    assert clock.to_units(1.0) == 300
+    assert clock.to_units(4.97) == 1491
+    assert clock.units_to_ticks(1491) == 50
+    assert clock.units_to_ticks(30) == 1
+
+
 def test_unrepresentable_durations_are_rejected() -> None:
     config = NightConfig()
-    timing = type(config.timing)(hour_durations_s=(90.05,))
+    timing = type(config.timing)(hour_durations_s=(90.001,))
     with pytest.raises(ValueError):
         Clock.from_config(timing)
 

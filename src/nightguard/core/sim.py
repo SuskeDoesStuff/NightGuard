@@ -220,7 +220,7 @@ class NightSim:
         # 3. Drain power; enter blackout at zero.
         active = power.active_units(state.office, self.config.power)
         state.power_pct -= power.drain_per_tick(active, self.config.power, self.clock.sim_tick_s)
-        if state.power_pct <= 0.0 and not state.blackout and self.config.blackout.enabled:
+        if state.power_pct <= 0.0 and not state.blackout:
             blackout.apply_onset(state)
 
         # 4. If in blackout, advance its state machine and check for a kill.

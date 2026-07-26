@@ -84,8 +84,7 @@ nightguard/
 │   │   ├── night1.yaml … night6.yaml
 │   │   └── custom_template.yaml
 │   └── presets/
-│       ├── v0_smoke.yaml
-│       └── benchmark_v2.yaml
+│       └── benchmark_v2.yaml      # v2.0
 ├── src/nightguard/
 │   ├── __init__.py
 │   ├── core/
@@ -136,22 +135,32 @@ nightguard/
 │   ├── validate.py
 │   └── export_trace.py
 └── tests/
+    ├── conftest.py
     ├── test_clock.py
+    ├── test_config.py
     ├── test_power.py
     ├── test_topology.py
     ├── test_warden.py
     ├── test_drifter.py
     ├── test_prowler.py
     ├── test_sprinter.py
+    ├── test_escalation.py
+    ├── test_trace.py
     ├── test_blackout.py
     ├── test_determinism.py
-    ├── test_fidelity.py
+    ├── test_no_global_rng.py
     └── test_env_api.py
 ```
 
+There is no `test_fidelity.py`. The exit-criteria checks live in `scripts/validate.py`, and the
+fidelity assertions of §8 are spread across the per-topic test files above, next to the
+mechanics they constrain. That layout is deliberate; do not consolidate them.
+
 ### 1.2 Stack and conventions
 
-- Python 3.11+.
+- Python 3.12+. The floor was 3.11 until v0.2; it was raised because numpy's type stubs use
+  `type` statements that only parse under 3.12, so `mypy --strict` could not actually be run at
+  3.11. An unverifiable support claim is worse than a higher floor.
 - Runtime dependencies: `numpy`, `gymnasium`, `pyyaml`. Nothing else in the base install.
 - Optional extras: `[train]` adds `torch`, `stable-baselines3`, `sb3-contrib`.
   `[dev]` adds `pytest`, `ruff`, `mypy`.
@@ -330,6 +339,10 @@ Action space is `Discrete(17)`:
 Actions 6–16 fold "raise monitor" and "switch camera" into one, removing a two-step
 sequence the agent would otherwise waste capacity learning.
 
+Exactly one action resolves per decision step. Closing both doors therefore takes two
+decision steps (1.0 s), and the agent cannot respond to simultaneous threats at both doors
+within one step. This is intended. Do not add multi-action steps.
+
 During blackout (3.7) all actions except `NOOP` are no-ops.
 
 ### 3.3 The AI level system
@@ -436,10 +449,21 @@ appear as a frame rate anywhere in this codebase.
 
 - Monitor being up no longer suppresses opportunities.
 - Looking specifically at camera `E_CORNER` (10) *does* suppress them.
-- WARDEN attacks when all of: opportunity succeeds, `monitor_up` is true, and
+- WARDEN **moves into `OFFICE`** when all of: opportunity succeeds, `monitor_up` is true,
   `selected_camera != E_CORNER`, and `door_right` is open.
 - If the opportunity succeeds while `door_right` is closed, WARDEN retreats to `E_HALL`
   (not to `COMMONS`).
+
+Earlier drafts said WARDEN "attacks" here. Read as an immediate kill, that made `OFFICE`
+unreachable and the 25%/s office mechanic below dead code. It is a **move**, gated on
+`monitor_up` exactly as §3.5's door entities are; the kill happens afterwards, inside the
+office, while the monitor is down. CeriW is explicit: WARDEN "cannot enter your office when
+your camera is down. He can only enter while you are looking at a camera that isn't
+[`E_CORNER`] while the doors are open." Recorded in §10.
+
+The consequence is deliberate and load-bearing: all three path entities can only enter the
+office while the monitor is up, so `SPRINTER` is the only entity that punishes keeping the
+monitor down. That is the asymmetry §3.5's rationale claims the design has.
 
 **Inside the office.** Once WARDEN reaches `OFFICE`:
 
@@ -603,6 +627,10 @@ drain_per_tick   = drain_per_second × 0.1
 
 Consequences worth understanding before you implement:
 
+- The floor of 1 means the **first** active control is free: `active` is 1 whether the office
+  is idle or has exactly one door shut, one light on, or the monitor up. This is not a bug and
+  must not be "fixed"; it is §3.10 as CeriW documents it, and it is why v0.1's exit criterion 3
+  needs two doors rather than one.
 - The cap of 4 means both doors plus both lights costs the same as both doors plus both
   lights plus the monitor. Camera use is free once you are already spending on four things.
 - Holding both doors all night is impossible on every night: at 0.4 pp/s the budget is
@@ -671,10 +699,14 @@ timing:
   sim_tick_s: 0.1
   decision_step_s: 0.5
   hour_durations_s: [90.0, 89.0, 89.0, 89.0, 89.0, 89.0]
-  # Entity intervals are not multiples of the sim tick, so scheduling them in floats accumulates
-  # drift. Seconds convert to exact integer units of this size instead. Numerical hygiene, not a
-  # game constant.
-  time_resolution_s: 0.001
+  # Entity intervals and WARDEN's countdown are not multiples of the sim tick, so scheduling
+  # them in floats accumulates drift. Seconds convert to exact integer units instead:
+  #   units = round(seconds × time_units_per_second)
+  # 300 = lcm(60, 100) is the coarsest grid on which every timing constant in §3 and §4 is an
+  # exact integer — the countdown table divides by 60, the opportunity intervals are
+  # two-decimal. At 1/1000 or 1/100 the six non-terminating countdowns fail; at 1/60 all four
+  # intervals and both immunity bounds fail. This is a resolution, NOT a frame rate.
+  time_units_per_second: 300
   conversion_tolerance: 1.0e-9
 
 topology:
@@ -739,7 +771,9 @@ office:
   light_momentary: true
 
 blackout:
-  enabled: true
+  # No `enabled` flag. Blackout is unconditional: power reaching 0 always enters the absorbing
+  # state. A disable switch would leave the power model — the subsystem everything else is
+  # validated against — with an undefined corner where power goes negative and nothing happens.
   approach: {interval_s: 5.0, prob: 0.2, max_s: 20.0}
   song:     {interval_s: 5.0, prob: 0.2, max_s: 20.0}
   kill:     {interval_s: 2.0, prob: 0.2}
@@ -920,7 +954,16 @@ actions.
 
 **Exit criteria.**
 1. `NightSim` accepts a seed and an action script and is fully deterministic.
-2. Idle power at 6AM matches this table to within `1e-6`:
+2. Idle power at 6AM matches the closed form to within `1e-6`:
+
+   ```
+   drained = (0.1 + 0.1/D) × 535
+   ```
+
+   **The closed form is normative; the table below is rounded display only and is not an
+   assertion target.** It is printed to 3 dp and cannot be met at `1e-6`: only nights 3 and 4
+   are exact, night 1 is off by 8.3e-5 and nights 2, 5 and 6 by 3.3e-4. Assertions run against
+   the closed form.
 
 | Night | Drained (pp) | Remaining (pp) |
 |---|---|---|
@@ -936,16 +979,22 @@ actions.
    floored at 1 per §3.10, a single control drains at exactly the idle rate and the night never
    blacks out; two give `0.2104167 pp/s` and t = 470.495 s, the figure this criterion already
    quoted. See §10 and `CHANGELOG.md`.)
-4. Hour boundary crossings fire escalation exactly once each; night-1 end-of-night levels
-   are `0/3/2/2`.
+4. Exactly **three** escalation events fire, at the 2AM, 3AM and 4AM boundaries (ticks 1790,
+   2680, 3570). The 1AM and 5AM boundaries carry none — §3.3's table is authoritative, not the
+   count of hour boundaries. Assert exactly three events and their tick indices; night-1
+   end-of-night levels are `0/3/2/2`.
 
 ### v0.2 — Full roster
 
 Add `WARDEN` (camera suppression, countdown, stage lock, inverted rules at `E_CORNER`,
 25%/s office kill) and `SPRINTER` (stage counter, universal camera freeze, immunity window,
-door bang, forced attack). Add door jam and office invasion for the three door entities.
+door bang, forced attack), the trace format from §5, and office entry for `WARDEN`.
 
-Add the trace format from section 5. From this version on, every episode can emit a trace.
+Door jam and office invasion for `DRIFTER` and `PROWLER` shipped in v0.1; `WARDEN` does not
+jam a door (§3.4 gives it no jam mechanic) and its office kill is probabilistic rather than
+monitor-triggered.
+
+From this version on, every episode can emit a trace.
 
 **Exit criteria.**
 1. All four entities can produce a kill in simulation, verified by seeded tests.
@@ -1025,8 +1074,22 @@ Packaging, docs, `pip install nightguard`, registered env IDs, reproducibility i
 
 ## 8. Validation suite
 
-Lives in `tests/test_fidelity.py` and `scripts/validate.py`. This is where most of the real
-effort in v0 sits, and it is the step people skip and regret.
+Lives in `scripts/validate.py` and, for the per-mechanic assertions, in the per-topic test
+files listed in §1.1. This is where most of the real effort in v0 sits, and it is the step
+people skip and regret.
+
+### 8.0 Non-vacuity
+
+Every statistical assertion must be accompanied by a check demonstrating the test can fail.
+
+- Determinism tests must first assert that the action script produces at least N distinct
+  outcomes across seeds, then assert reproducibility within a seed. An all-`NOOP` script is
+  vacuous: with the §3.5 and §3.4 monitor gates, no entity can enter the office, so every seed
+  produces an identical surviving episode on every night.
+- Threshold assertions must record the measured value alongside the threshold, so a test
+  passing by a factor of ten is visible rather than silently green.
+- Any assertion that is structurally unable to fail at the current milestone must be marked
+  `provisional` in the test file, with a note stating which milestone restores its meaning.
 
 ### 8.1 Passive power curves
 
@@ -1043,17 +1106,27 @@ Two reference policies ship permanently and act as the regression suite:
 
 Over 10,000 seeded episodes:
 
-| Night | `do_nothing` survival | Direction of assertion |
-|---|---|---|
-| 1 | high | must be ≥ 0.8 |
-| 2 | moderate | must be < night 1 |
-| 3 | lower | must be < night 2 |
-| 4 | low | must be < night 3 |
-| 5 | near zero | must be ≤ 0.05 |
-| 6 | near zero | must be ≤ 0.02 |
+- **Night 1:** measured `do_nothing` survival must agree with the analytic derivation from
+  §3.3 and §3.7 within binomial sampling error. The derived value is **0.2397**; see
+  `CHANGELOG.md` for the derivation. This replaces the original "must be ≥ 0.8" threshold,
+  which was unreachable against a faithful SPRINTER. An agreement test is strictly stronger
+  than a threshold because it can fail in both directions, which is what makes this the most
+  diagnostic assertion in the suite.
+- **Nights 2 to 6:** survival must be non-increasing, permitting ties, and bounded above by a
+  small constant. Record the measured values per §8.0.
+- `rhythm` must beat `do_nothing` on nights 3 through 6.
 
-If night 1 kills `do_nothing` often, something is wrong; that is the single most diagnostic
-assertion in the suite. `rhythm` must beat `do_nothing` on nights 3 through 6.
+Near-zero `do_nothing` survival from night 2 onward is expected and correct. Under the §3.4
+and §3.5 monitor gates, `WARDEN`, `DRIFTER` and `PROWLER` cannot enter the office against a
+policy that never raises the monitor, so `SPRINTER` is the sole kill path for `do_nothing`.
+Its expected success count is 8.95 on night 2 and 14.0 on night 3 against an arming threshold
+of 3, so survival is indistinguishable from zero and the original strict monotonic chain
+(`night 3 < night 2 < night 1`) cannot be satisfied at any sample size. Do not restore it, and
+do not adjust the night-1 figure after measuring — if the measurement disagrees with the
+derivation, one of them is wrong and that is the finding.
+
+**Provisional until v0.2.** Before `SPRINTER` exists, `do_nothing` on night 1 is structurally
+unkillable and survival is exactly 1.000 — a proof, not a measurement (§8.0).
 
 ### 8.3 WARDEN stage-to-office latency
 
@@ -1215,7 +1288,10 @@ comment at its point of use.
 | SPRINTER immunity range | `[0.83, 16.67]` s | Two sources disagree; CeriW is better evidenced. |
 | WARDEN office kill rate | 0.25 / s | Two sources disagree (0.20 vs 0.25); CeriW is better evidenced. |
 | Does one active control drain more than none? | No. `active = clamp(count, 1, 4)`, §3.10 as written. | Two sources disagree: CeriW gives count-with-floor-1, the Steam drainage guide's measured 12/20/29/38 pp per hour imply `1 + count`. CeriW is better evidenced, and §3 is normative. §7's v0.1 criterion 3 was corrected to match. |
-| Can a door entity enter the office with the monitor down? | No. Entry requires `monitor_up`. | §3.5's kill trigger presupposes it, §8.2's night-1 assertion requires it, and it is what makes the door entities punish camera timing. |
+| Can a door entity enter the office with the monitor down? | No. Entry requires `monitor_up`. | §3.5's kill trigger presupposes it, and it is what makes the door entities punish camera timing. CeriW confirms it directly. |
+| Is WARDEN's `E_CORNER` "attack" a kill or a move? | A move into `OFFICE`, gated on `monitor_up`. The kill is the 25%/s roll afterwards, while the monitor is down. | Read as a kill, `OFFICE` is unreachable and the 25%/s mechanic is dead code. CeriW: WARDEN "cannot enter your office when your camera is down." |
+| Timing grid resolution | `time_units_per_second: 300` = `lcm(60, 100)`. | The countdown table divides by 60; the opportunity intervals are two-decimal. 300 is the coarsest grid on which both are exact. Not a frame rate: the `/60` becomes an integer multiply, which strengthens the frame-rate lock above rather than weakening it. |
+| §8.2's night-1 `do_nothing` threshold | Replaced by agreement with the analytic derivation (0.2397). | The original ≥ 0.8 is unreachable against a faithful SPRINTER, and an agreement test can fail in both directions. |
 
 ---
 

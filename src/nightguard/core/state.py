@@ -3,8 +3,10 @@
 Configuration objects are frozen; simulation state is not. Nothing here is module-level mutable.
 
 :class:`Action` gives the 17 actions of PROJECT.md 3.2 semantic names. Their integer values are the
-normative indices from that table, but the ``Discrete(17)`` space itself belongs to ``env/`` (1.3):
-core accepts an :class:`Action` and knows nothing about spaces, observations or reward.
+normative indices from that table, and core owns them because ``trace/`` must serialise them
+(PROJECT.md 5's ``"action": 5``) while 1's dependency rule permits only ``trace -> core``. The
+``Discrete(17)`` space and the encode/decode boundary live in ``env/actions.py`` (1.3): core knows
+nothing about spaces, observations or reward.
 """
 
 from __future__ import annotations

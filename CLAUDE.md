@@ -41,26 +41,42 @@ All four must pass before any milestone is called done. See PROJECT.md §11.
 Do not begin a version until the previous version's exit criteria pass. v0.3 is the critical-path
 milestone: everything after it depends on the simulator being correct.
 
+## Evidence discipline
+
+- Never derive an expected value by running the implementation. Derive from PROJECT.md, then
+  compare. If they disagree, investigate; do not adopt the measured value.
+- Never weaken a tolerance, threshold, or assertion to make a test pass. If you believe an exit
+  criterion is wrong, stop and say so.
+- Every statistical assertion needs a non-vacuity check (PROJECT.md §8.0).
+
 ## Settled decisions — do not re-litigate
 
-PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning. Three were settled in v0.1:
+PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning.
 
-- **`active = clamp(count, 1, 4)`.** One active control drains at exactly the idle rate. §7's exit
-  criterion 3 was corrected from "one door" to "two doors" to match.
-- **Office entry requires `monitor_up`.** A closed door turns the entity away regardless; an open
-  door with the monitor down is a stalemate where the entity camps at the corner.
-- **Office invasion shipped in v0.1**, not v0.2. v0.2 is WARDEN and SPRINTER only.
+- **`active = clamp(count, 1, 4)`.** The first active control is free — one door shut drains at
+  exactly the idle rate. §7's exit criterion 3 needs *two* doors.
+- **Office entry requires `monitor_up`, for all three path entities.** A closed door turns the
+  entity away regardless; an open door with the monitor down is a stalemate where the entity camps
+  at the corner. SPRINTER is therefore the only entity that punishes keeping the monitor down.
+- **WARDEN's `E_CORNER` "attack" is a move into `OFFICE`, not a kill.** The kill is the 25%/s roll
+  afterwards, while the monitor is down. Read as a kill, `OFFICE` is unreachable.
+- **§8.2's night-1 threshold is an agreement test**, not `≥ 0.8`: measured `do_nothing` survival
+  must match the analytic 0.2397 within binomial error. Nights 2–6 are near zero by design.
 
 ## Traps
 
-- **§8.2's night-1 assertion will come under pressure in v0.2.** SPRINTER charges only while the
-  monitor is *down*, so `do_nothing` is maximally exposed to it. Expect a conflict between §3.7 and
-  §8.2's "`do_nothing` survives night 1 ≥ 0.8" and resolve it deliberately.
-- **Determinism tests are vacuous under an all-NOOP script.** With the monitor never raised, the door
-  entities end camped at their corners and every seed produces the same terminal state. §8.5's
-  byte-identical trace check must use scripts that raise the monitor.
-- **The §7 idle-power table is rounded to 3 dp** and cannot be met at 1e-6 as printed. Assert against
-  the closed form; nights 1, 2, 5 and 6 are off by 8e-5 to 3e-4.
-- **Entity opportunity intervals are not multiples of the sim tick.** They are scheduled in exact
-  integer units and recomputed from the firing count. Never accumulate them in floats, and never
-  round them to the tick grid — that collapses DRIFTER and PROWLER onto one period.
+- **Timing resolution is 1/300 s = lcm(60, 100),** expressed as `timing.time_units_per_second: 300`
+  so the value stays an exact integer. The countdown table divides by 60; the opportunity intervals
+  are two-decimal. 1/300 is the coarsest grid on which both are exact — at 1/1000 six of WARDEN's
+  ten countdowns are non-terminating. Do not change it without re-running `test_config.py`'s
+  exactness test. It is a resolution, **not** a frame rate.
+- **Never accumulate timers in floats, and never round an interval to the tick grid.** Firing ticks
+  are recomputed from the firing count. Rounding collapses DRIFTER and PROWLER onto one period.
+- **WARDEN's countdown is not paused by monitor raises.** Only new opportunity *rolls* are
+  suppressed by the monitor. This is v0.2 exit criterion 3 and the single most likely place for a
+  plausible-looking bug to survive testing.
+- **Determinism tests are vacuous under an all-NOOP script.** With the monitor never raised, no
+  entity can enter the office and every seed produces an identical surviving episode. §8.5's
+  byte-identical trace check must assert distinct outcomes across seeds first (§8.0).
+- **The §7 idle-power table is rounded to 3 dp** and is display only. The closed form
+  `(0.1 + 0.1/D) × 535` is normative; nights 1, 2, 5 and 6 differ by 8e-5 to 3e-4.

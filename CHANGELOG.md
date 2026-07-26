@@ -1,5 +1,99 @@
 # Changelog
 
+## v0.2 — Full roster
+
+### v0.1 follow-ups
+
+Spec corrections to `PROJECT.md`, from the v0.1 review:
+
+- **§7 v0.1 criterion 2** made the closed form `(0.1 + 0.1/D) × 535` normative. The printed table
+  is rounded to 3 dp and cannot be met at `1e-6`: only nights 3 and 4 are exact, night 1 is off by
+  8.3e-5 and nights 2/5/6 by 3.3e-4. The table is now labelled display-only.
+- **§7 v0.1 criterion 4** reworded. "Hour boundary crossings fire escalation exactly once each"
+  over-counts: there are five interior boundaries but §3.3 assigns escalation to three. Now states
+  three events at ticks 1790/2680/3570, with §3.3 authoritative.
+- **§3.2** records that exactly one action resolves per decision step, so closing both doors takes
+  1.0 s and simultaneous threats at both doors cannot both be answered. Intended, not an artifact.
+- **§3.10** records that the clamp floor makes the *first* active control free.
+- **§1.1 and §8** corrected to the test layout actually built: no `test_fidelity.py`, exit criteria
+  in `scripts/validate.py`, per-mechanic assertions beside their mechanics.
+- **New §8.0 "Non-vacuity"**: every statistical assertion needs a check that it can fail; threshold
+  assertions record the measured value; structurally-unfailable assertions are marked provisional.
+- **§7 v0.2 scope** corrected — door jam and office invasion shipped in v0.1. WARDEN has no jam
+  mechanic, so v0.2 adds WARDEN, SPRINTER, the trace format, and office *entry* for WARDEN.
+- **§4** lost `blackout.enabled`; **§1.2** raised the Python floor to 3.12.
+
+Code:
+
+- **`blackout.enabled` deleted.** With the flag off, power went negative and nothing happened — an
+  undefined corner in the one subsystem everything else is validated against. Blackout is now
+  unconditional and a config that still sets the key raises `ConfigError`.
+- **Python floor 3.12.** numpy's stubs use `type` statements that only parse under 3.12, so
+  `mypy --strict` could not be run at 3.11. An unverifiable support claim is worse than a floor.
+- **`Action` split.** `env/actions.py` now owns the `Discrete(17)` space and the encode/decode
+  boundary. `core.Action` keeps the integer values: §5's trace records `"action": 5` and §1 permits
+  only `trace → core`, so moving the indices out would leave the trace writer unable to emit its
+  own format. The split is indices (core) versus space (env).
+- **Dead artifacts removed**: `configs/presets/v0_smoke.yaml`, `Clock.is_hour_boundary`.
+- **Timing grid changed to 1/300 s**, expressed as `timing.time_units_per_second: 300` so the
+  config value stays an exact integer — 1/300 has no finite decimal form, and dividing by a
+  fractional resolution would carry representation error into every constant. `300 = lcm(60, 100)`:
+  the countdown table divides by 60, the opportunity intervals are two-decimal. At 1/1000 or 1/100,
+  six of WARDEN's ten countdowns are non-terminating; at 1/60, all four intervals and both immunity
+  bounds fail. `test_config.py` now asserts every timing constant in every shipped night config
+  lands on the grid — that assertion is the durable part, not the value.
+
+### §3.4 resolved: WARDEN's `E_CORNER` "attack" is a move
+
+§3.4 said WARDEN "attacks" when an opportunity succeeds at `E_CORNER` with the monitor up and a
+camera other than `E_CORNER` selected. Read as an immediate kill, `OFFICE` was unreachable and
+§3.4's own 25%/s office mechanic was dead code.
+
+Resolved as a **move into `OFFICE` gated on `monitor_up`**, with the kill being the 25%/s roll
+afterwards while the monitor is down. A closed `door_right` still retreats to `E_HALL`. CeriW is
+explicit: WARDEN "cannot enter your office when your camera is down. He can only enter while you
+are looking at a camera that isn't [`E_CORNER`] while the doors are open", the kill is "25% every 1
+second" while the cameras are down, and a permanently-down monitor means he never attacks.
+
+This makes all three path entities enter only while the monitor is up, so SPRINTER is the sole
+entity punishing a monitor-down policy — the asymmetry §3.5's v0.1 rationale already claimed.
+
+### §8.2 restructured, with the derivation
+
+**Night-1 `do_nothing` survival, derived from §3.1, §3.3 and §3.7 before implementing SPRINTER.**
+
+`do_nothing` never raises the monitor, so no camera freeze and no immunity window ever apply, and
+never closes a door, so there are no bangs and no stage resets. SPRINTER's opportunities fire at
+`ceil(n × 5.01 / 0.1)` ticks. Night-1 levels are 0 until 3AM (t = 268 s), 1 until 4AM (t = 357 s),
+2 to dawn, giving **53 opportunities at level 0, 18 at level 1, 35 at level 2** and an expected
+4.400 successes against an arming threshold of 3.
+
+Arming is not sufficient: the forced attack fires 25 s later, and §3.1 makes reaching t = 535 s
+uncaught a win, so the 3rd success must land by **t = 510 s**. That removes the last five level-2
+opportunities, leaving **18 at level 1 and 30 at level 2** and an expected 3.900.
+
+Survival is then `P(X + Y < 3)` for `X ~ Bin(18, 0.05)`, `Y ~ Bin(30, 0.10)`:
+
+| Method | Survival |
+|---|---|
+| Poisson approximation on the full-night mean 4.4 | 0.1851 |
+| Exact binomial, 25 s deadline ignored | 0.1719 |
+| **Exact binomial with the 25 s deadline** | **0.2397** |
+
+**0.2397 is normative.** At 10,000 episodes the binomial SD is 0.0043, so the earlier estimate of
+0.19 sits 11.6 SD away.
+
+§8.2's original table required night-1 survival ≥ 0.8 and a strict monotonic chain across nights.
+Neither is reachable against a faithful SPRINTER: expected success counts are 8.95 on night 2 and
+14.0 on night 3, so `do_nothing` survival is indistinguishable from zero from night 2 onward and
+the chain cannot be satisfied at any sample size. Restructured to an agreement test on night 1
+(which can fail in both directions, unlike a threshold) and non-increasing-with-ties on nights 2–6.
+
+**Note on the v0.1 rationale below.** v0.1 justified the §3.5 monitor gate partly by §8.2's ≥ 0.8
+threshold, which this entry supersedes. The decision stands on its other two legs — §3.5's kill
+trigger presupposes the monitor was up at entry, and CeriW states the rule directly — and is now
+further corroborated by the identical rule applying to WARDEN.
+
 ## v0.1 — Skeleton
 
 Initial implementation: simulation core with clock, power model, the five office controls, and the

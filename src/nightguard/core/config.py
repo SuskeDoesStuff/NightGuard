@@ -36,16 +36,20 @@ class TimingConfig:
         sim_tick_s: Length of one simulation tick, in seconds.
         decision_step_s: Length of one ``env.step()``, in seconds.
         hour_durations_s: Length of each in-game hour, in seconds. Hour 0 is longer.
-        time_resolution_s: Granularity used to convert seconds to exact integer units. Entity
-            intervals are not multiples of the sim tick, so scheduling them in floats accumulates
-            drift; converting to integer units of this size keeps the schedule exact.
+        time_units_per_second: Integer units per second of the exact scheduling grid, via
+            ``units = round(seconds * time_units_per_second)``. Entity intervals and WARDEN's
+            countdown are not multiples of the sim tick, so scheduling them in floats
+            accumulates drift. 300 = lcm(60, 100) is the coarsest grid on which every timing
+            constant in PROJECT.md 3 and 4 is an exact integer: the countdown table divides by
+            60, the opportunity intervals are two-decimal. This is a resolution, not a frame
+            rate, and nothing may treat it as one.
         conversion_tolerance: Numerical-hygiene epsilon for that conversion. Not a game constant.
     """
 
     sim_tick_s: float = 0.1
     decision_step_s: float = 0.5
     hour_durations_s: tuple[float, ...] = (90.0, 89.0, 89.0, 89.0, 89.0, 89.0)
-    time_resolution_s: float = 0.001
+    time_units_per_second: int = 300
     conversion_tolerance: float = 1e-9
 
 
@@ -208,9 +212,14 @@ class BlackoutPhaseConfig:
 
 @dataclass(frozen=True)
 class BlackoutConfig:
-    """Blackout. PROJECT.md 3.11. v0.1 uses a placeholder that terminates immediately."""
+    """Blackout. PROJECT.md 3.11. v0.2 still uses a placeholder that terminates immediately.
 
-    enabled: bool = True
+    There is deliberately no ``enabled`` flag. Blackout is unconditional: power reaching 0 always
+    enters the absorbing state. A disable switch left the power model — the subsystem everything
+    else is validated against — with an undefined corner where power went negative and nothing
+    happened.
+    """
+
     approach: BlackoutPhaseConfig = BlackoutPhaseConfig(interval_s=5.0, prob=0.2, max_s=20.0)
     song: BlackoutPhaseConfig = BlackoutPhaseConfig(interval_s=5.0, prob=0.2, max_s=20.0)
     kill: BlackoutPhaseConfig = BlackoutPhaseConfig(interval_s=2.0, prob=0.2, max_s=None)
@@ -359,7 +368,7 @@ def _parse_timing(data: Mapping[str, Any], base: TimingConfig) -> TimingConfig:
         sim_tick_s=_float(data, "sim_tick_s", base.sim_tick_s),
         decision_step_s=_float(data, "decision_step_s", base.decision_step_s),
         hour_durations_s=_float_tuple(data, "hour_durations_s", base.hour_durations_s),
-        time_resolution_s=_float(data, "time_resolution_s", base.time_resolution_s),
+        time_units_per_second=_int(data, "time_units_per_second", base.time_units_per_second),
         conversion_tolerance=_float(data, "conversion_tolerance", base.conversion_tolerance),
     )
 
@@ -485,8 +494,11 @@ def _parse_phase(data: Mapping[str, Any], base: BlackoutPhaseConfig) -> Blackout
 
 
 def _parse_blackout(data: Mapping[str, Any], base: BlackoutConfig) -> BlackoutConfig:
+    if "enabled" in data:
+        raise ConfigError(
+            "blackout.enabled was removed in v0.2: blackout is unconditional. See PROJECT.md 4."
+        )
     return BlackoutConfig(
-        enabled=_bool(data, "enabled", base.enabled),
         approach=_parse_phase(_mapping(data, "approach"), base.approach),
         song=_parse_phase(_mapping(data, "song"), base.song),
         kill=_parse_phase(_mapping(data, "kill"), base.kill),

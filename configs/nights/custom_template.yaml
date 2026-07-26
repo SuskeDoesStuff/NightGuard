@@ -8,6 +8,12 @@ timing:
   sim_tick_s: 0.1
   decision_step_s: 0.5
   hour_durations_s: [90.0, 89.0, 89.0, 89.0, 89.0, 89.0]
+  # Exact integer scheduling grid: units = round(seconds * time_units_per_second).
+  # 300 = lcm(60, 100) is the coarsest grid on which every timing constant below is an exact
+  # integer -- the countdown table divides by 60, the opportunity intervals are two-decimal.
+  # A resolution, NOT a frame rate. Changing it requires re-running the config exactness test.
+  time_units_per_second: 300
+  conversion_tolerance: 1.0e-9
 
 topology:
   file: configs/topology/default.yaml
@@ -83,7 +89,7 @@ office:
   light_momentary: true
 
 blackout:
-  enabled: true
+  # No `enabled` flag: blackout is unconditional. Setting one is a config error.
   approach: {interval_s: 5.0, prob: 0.2, max_s: 20.0}
   song: {interval_s: 5.0, prob: 0.2, max_s: 20.0}
   kill: {interval_s: 2.0, prob: 0.2}

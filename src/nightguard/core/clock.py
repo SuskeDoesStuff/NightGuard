@@ -23,16 +23,16 @@ class Clock:
     Attributes:
         sim_tick_s: Length of one tick, in seconds.
         decision_step_s: Length of one decision step, in seconds.
-        time_resolution_s: Granularity of exact second-to-integer conversion.
+        time_units_per_second: Integer units per second of the exact scheduling grid.
         conversion_tolerance: Epsilon for validating those conversions.
-        units_per_tick: Resolution units in one tick.
+        units_per_tick: Grid units in one tick.
         ticks_per_decision_step: Sim ticks advanced by one ``env.step()``.
         hour_boundary_ticks: Tick index of each hour boundary, including 0 and dawn.
     """
 
     sim_tick_s: float
     decision_step_s: float
-    time_resolution_s: float
+    time_units_per_second: int
     conversion_tolerance: float
     units_per_tick: int
     ticks_per_decision_step: int
@@ -41,17 +41,17 @@ class Clock:
     @classmethod
     def from_config(cls, timing: TimingConfig) -> Clock:
         """Build a clock from a :class:`TimingConfig`."""
-        resolution = timing.time_resolution_s
+        per_second = timing.time_units_per_second
         tolerance = timing.conversion_tolerance
-        units_per_tick = _to_units(timing.sim_tick_s, resolution, tolerance, "sim_tick_s")
-        step_units = _to_units(timing.decision_step_s, resolution, tolerance, "decision_step_s")
+        units_per_tick = _to_units(timing.sim_tick_s, per_second, tolerance, "sim_tick_s")
+        step_units = _to_units(timing.decision_step_s, per_second, tolerance, "decision_step_s")
         if step_units % units_per_tick != 0:
             raise ValueError("decision_step_s must be a whole number of sim ticks")
 
         boundaries = [0]
         for index, duration in enumerate(timing.hour_durations_s):
             duration_units = _to_units(
-                duration, resolution, tolerance, f"hour_durations_s[{index}]"
+                duration, per_second, tolerance, f"hour_durations_s[{index}]"
             )
             if duration_units % units_per_tick != 0:
                 raise ValueError(f"hour_durations_s[{index}] must be a whole number of sim ticks")
@@ -60,7 +60,7 @@ class Clock:
         return cls(
             sim_tick_s=timing.sim_tick_s,
             decision_step_s=timing.decision_step_s,
-            time_resolution_s=resolution,
+            time_units_per_second=per_second,
             conversion_tolerance=tolerance,
             units_per_tick=units_per_tick,
             ticks_per_decision_step=step_units // units_per_tick,
@@ -68,8 +68,12 @@ class Clock:
         )
 
     def to_units(self, seconds: float, name: str = "value") -> int:
-        """Convert ``seconds`` to exact integer resolution units."""
-        return _to_units(seconds, self.time_resolution_s, self.conversion_tolerance, name)
+        """Convert ``seconds`` to exact integer grid units."""
+        return _to_units(seconds, self.time_units_per_second, self.conversion_tolerance, name)
+
+    def units_to_ticks(self, units: int) -> int:
+        """Convert grid units to whole sim ticks, rounding up."""
+        return -(-units // self.units_per_tick)
 
     def to_ticks(self, seconds: float, name: str = "value") -> int:
         """Convert ``seconds`` to a whole number of sim ticks, rounding up.
@@ -124,17 +128,16 @@ class Clock:
             raise ValueError(f"tick must be non-negative, found {tick}")
         return bisect_right(self.hour_boundary_ticks, tick) - 1
 
-    def is_hour_boundary(self, tick: int) -> bool:
-        """Whether ``tick`` is an interior hour boundary, i.e. one that fires escalation."""
-        return tick in self.hour_boundary_ticks[1:-1]
 
+def _to_units(seconds: float, per_second: int, tolerance: float, name: str) -> int:
+    """Convert seconds to integer grid units, rejecting values that are not representable.
 
-def _to_units(seconds: float, resolution_s: float, tolerance: float, name: str) -> int:
-    """Convert seconds to integer resolution units, rejecting values that are not representable."""
-    scaled = seconds / resolution_s
+    Multiplying by an integer count of units per second, rather than dividing by a fractional
+    resolution, keeps the conversion exact: 1/300 s has no finite decimal form, so the reciprocal
+    would carry representation error into every timing constant in the config.
+    """
+    scaled = seconds * per_second
     units = round(scaled)
     if abs(scaled - units) > tolerance * max(1.0, abs(scaled)):
-        raise ValueError(
-            f"{name}={seconds} is not a whole number of {resolution_s}s resolution units"
-        )
+        raise ValueError(f"{name}={seconds} is not a whole number of 1/{per_second}s grid units")
     return units
