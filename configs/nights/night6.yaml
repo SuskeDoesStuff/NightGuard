@@ -1,0 +1,6 @@
+# Night 6. PROJECT.md 3.3, 3.10.
+# End-of-night AI levels: 4/13/14/18.
+ai:
+  levels: [4, 10, 12, 16]
+power:
+  night_divisor: 3.0

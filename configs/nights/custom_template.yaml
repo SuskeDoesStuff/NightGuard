@@ -1,0 +1,102 @@
+# Full configuration schema. PROJECT.md 4.
+#
+# Every key below is optional: the loader deep-merges a night file onto the dataclass defaults in
+# core/config.py, which hold exactly these values. This file exists to document the complete schema in
+# one place; night1..night6.yaml carry only what they change.
+
+timing:
+  sim_tick_s: 0.1
+  decision_step_s: 0.5
+  hour_durations_s: [90.0, 89.0, 89.0, 89.0, 89.0, 89.0]
+
+topology:
+  file: configs/topology/default.yaml
+
+entities:
+  warden:
+    interval_s: 3.02
+    # Community sources disagree on whether E_HALL is on the path. This project includes it, on the
+    # strength of CeriW's reference. Locked decision, PROJECT.md 10 -- do not revisit.
+    path: [STAGE, COMMONS, E_RESTROOMS, E_KITCHEN, E_HALL, E_CORNER, OFFICE]
+    # countdown_seconds = (numerator - per_level * ai_level) / divisor.
+    # The divisor of 60 reflects the original's frame counter and exists only to derive the seconds
+    # table in 3.4. It is NOT a frame rate and must never be treated as one anywhere else.
+    countdown_numerator: 1000
+    countdown_per_level: 100
+    countdown_divisor: 60
+    office_kill_prob_per_s: 0.25
+    stage_lock: true
+  drifter:
+    interval_s: 4.97
+    mode: pool
+    pool: [COMMONS, W_BACKSTAGE, W_CLOSET, W_HALL, W_CORNER]
+    start: STAGE
+    corner: W_CORNER
+    door: left
+    retreat_to: COMMONS
+  prowler:
+    interval_s: 4.98
+    mode: chain
+    chain: [COMMONS, E_RESTROOMS, E_KITCHEN, E_HALL, E_CORNER]
+    start: STAGE
+    corner: E_CORNER
+    door: right
+    retreat_to: COMMONS
+  sprinter:
+    interval_s: 5.01
+    stages_to_arm: 3
+    # Two sources disagree; CeriW is better evidenced. Locked decision, PROJECT.md 10.
+    immunity_range_s: [0.83, 16.67]
+    forced_attack_after_s: 25.0
+    grace_period_s: 0.5
+    bang_base_pct: 1.0
+    bang_increment_pct: 5.0
+    reset_stage_choices: [0, 1]
+    door: left
+
+ai:
+  # Order is [WARDEN, DRIFTER, PROWLER, SPRINTER] throughout the project.
+  # An entry may be an integer, or {uniform_choice: [a, b, ...]} to be rolled at reset.
+  levels: [0, 0, 0, 0]
+  level_min: 0
+  level_max: 20
+  escalation:
+    - {hour: 2, entities: [DRIFTER], delta: 1}
+    - {hour: 3, entities: [DRIFTER, PROWLER, SPRINTER], delta: 1}
+    - {hour: 4, entities: [DRIFTER, PROWLER, SPRINTER], delta: 1}
+
+power:
+  start_pct: 99.0
+  # active = clamp(count of true office controls, active_min, active_max). The floor of 1 is why an
+  # entirely idle office still drains, and why exactly one control active costs the same as none.
+  # PROJECT.md 3.10; see CHANGELOG for the source conflict this resolves.
+  active_min: 1
+  active_max: 4
+  divisor: 10.0
+  # night_constant = night_constant_numerator / night_divisor
+  night_constant_numerator: 0.1
+  night_divisor: 9.6
+
+office:
+  invasion_kill_timeout_s: 30.0
+  door_jam_on_invasion: true
+  light_momentary: true
+
+blackout:
+  enabled: true
+  approach: {interval_s: 5.0, prob: 0.2, max_s: 20.0}
+  song: {interval_s: 5.0, prob: 0.2, max_s: 20.0}
+  kill: {interval_s: 2.0, prob: 0.2}
+
+flags:
+  rare_noise_enabled: false
+  timing_jitter_enabled: false
+  timing_jitter_pct: 0.0
+
+reward:
+  step_survival: 0.01
+  reach_dawn: 10.0
+  death: -10.0
+  power_penalty_coeff: -0.002
+  blackout_entry: -0.05
+  sparse_mode: false

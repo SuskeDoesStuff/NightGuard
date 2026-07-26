@@ -1,0 +1,6 @@
+# Night 4. PROJECT.md 3.3, 3.10.
+# WARDEN's starting level is rolled uniformly at reset, so end-of-night levels are 1-or-2/5/6/8.
+ai:
+  levels: [{uniform_choice: [1, 2]}, 2, 4, 6]
+power:
+  night_divisor: 4.0

@@ -1,0 +1,6 @@
+# Night 1. PROJECT.md 3.3, 3.10.
+# End-of-night AI levels: 0/3/2/2.
+ai:
+  levels: [0, 0, 0, 0]
+power:
+  night_divisor: 9.6

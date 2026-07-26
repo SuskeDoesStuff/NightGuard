@@ -1,0 +1,27 @@
+# Node metadata. PROJECT.md 2.2.
+#
+# Node IDs are stable integers and must NEVER be reordered: they are the index basis for the
+# observation one-hots from v1.0 onward and for the trace format from v0.2 onward.
+#
+# This file deliberately carries metadata only, not edges. PROJECT.md 2.3 states that the graph is
+# fully determined by the route definitions in section 3, so the DRIFTER pool, the PROWLER chain and
+# the WARDEN path live in the entity configs. Duplicating them here would create two sources of truth
+# for the same graph.
+#
+# selectable : whether the node can be chosen as a camera (actions 6-16 cover nodes 0-10).
+# has_video  : whether selecting it yields a visual observation. E_KITCHEN is selectable but blind;
+#              its occupancy reaches the agent only through the `kitchen` audio signal (3.9).
+
+nodes:
+  - {id: 0,  name: STAGE,        wing: shared, selectable: true,  has_video: true}
+  - {id: 1,  name: COMMONS,      wing: shared, selectable: true,  has_video: true}
+  - {id: 2,  name: COVE,         wing: west,   selectable: true,  has_video: true}
+  - {id: 3,  name: W_BACKSTAGE,  wing: west,   selectable: true,  has_video: true}
+  - {id: 4,  name: W_CLOSET,     wing: west,   selectable: true,  has_video: true}
+  - {id: 5,  name: W_HALL,       wing: west,   selectable: true,  has_video: true}
+  - {id: 6,  name: W_CORNER,     wing: west,   selectable: true,  has_video: true}
+  - {id: 7,  name: E_RESTROOMS,  wing: east,   selectable: true,  has_video: true}
+  - {id: 8,  name: E_KITCHEN,    wing: east,   selectable: true,  has_video: false}
+  - {id: 9,  name: E_HALL,       wing: east,   selectable: true,  has_video: true}
+  - {id: 10, name: E_CORNER,     wing: east,   selectable: true,  has_video: true}
+  - {id: 11, name: OFFICE,       wing: none,   selectable: false, has_video: false}
