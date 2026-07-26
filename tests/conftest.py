@@ -20,6 +20,7 @@ from nightguard.core import (
     load_topology,
     with_levels,
 )
+from nightguard.core.blackout import apply_onset
 from nightguard.core.config import EscalationEvent
 
 # The idle drain table of PROJECT.md 3.10, as (night, night_divisor).
@@ -93,6 +94,18 @@ def clear_stage(sim: NightSim) -> None:
     """
     sim.state.drifter.node = Node.COMMONS
     sim.state.prowler.node = Node.COMMONS
+
+
+def force_blackout_at(sim: NightSim, sim_tick: int) -> NightSim:
+    """Run to ``sim_tick`` and force blackout onset there. PROJECT.md 8.7.
+
+    8.7 specifies "power forced to 0 at t = 500 s"; forcing onset directly makes the remaining
+    budget exact rather than dependent on where the drain happens to cross zero.
+    """
+    while sim.state.tick < sim_tick and not sim.state.terminated:
+        sim.step(Action.NOOP)
+    apply_onset(sim.state)
+    return sim
 
 
 def step_until(

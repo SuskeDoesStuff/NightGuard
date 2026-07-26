@@ -13,12 +13,14 @@ import hashlib
 import sys
 import tempfile
 from dataclasses import dataclass, replace
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from nightguard import derivations
 from nightguard.core import (
     Action,
     EntityId,
@@ -29,7 +31,9 @@ from nightguard.core import (
     load_night_config,
     load_topology,
 )
+from nightguard.core.blackout import apply_onset
 from nightguard.core.power import idle_drain_per_second
+from nightguard.core.state import action_for_camera
 from nightguard.policies import DoNothing, MonitorDown, Rhythm, run_policy
 from nightguard.trace import write_episode
 
@@ -155,15 +159,14 @@ def check_blackout_timing() -> list[Check]:
     sim.state.office.door_left = True
     sim.state.office.door_right = True
     result = sim.run()
-    hour = sim.clock.hour_at(result.time_s)
+    onset = [tick for tick, name in result.events if name == "blackout"]
+    hour = sim.clock.hour_at(sim.clock.time_s(onset[0])) if onset else -1
     return [
         Check(
             "v0.1-3 blackout",
-            f"night 1, two doors: {result.cause.value} at t={result.time_s:.1f}s "
-            f"(tick {result.ticks}, target {EXPECTED_BLACKOUT_TICK}), hour {hour}",
-            result.cause is TerminationCause.KILLED_BLACKOUT
-            and result.ticks == EXPECTED_BLACKOUT_TICK
-            and hour == EXPECTED_BLACKOUT_HOUR,
+            f"night 1, two doors: onset at tick {onset[0] if onset else None} "
+            f"(target {EXPECTED_BLACKOUT_TICK}), hour {hour}, ended {result.cause.value}",
+            onset == [EXPECTED_BLACKOUT_TICK] and hour == EXPECTED_BLACKOUT_HOUR,
         )
     ]
 
@@ -406,6 +409,220 @@ def check_monitor_down_probe() -> list[Check]:
     return checks
 
 
+# --- v0.3: the section 8 validation suite -------------------------------------------------------
+
+BLACKOUT_ONSET_TICK = 5000  # PROJECT.md 8.7: power forced to 0 at t = 500 s
+BLACKOUT_EPISODES = 10_000
+LATENCY_EPISODES = 600
+LATENCY_BAND = 0.08
+LATENCY_MEAN_BAND = 0.04
+NIGHT_SCALE = 4
+NEVER_ARMS = 10**6
+UNFROZEN_BAND = 0.02
+HARD_ZERO_PERIODS = (0.5, 1.0)
+CURVE_PERIODS = (1.5, 2.0, 4.0, 6.0, 10.0, 20.0, None)
+
+
+def check_do_nothing_survival() -> list[Check]:
+    """8.2: every night's do_nothing survival against its derivation."""
+    checks = []
+    rates = []
+    for night in range(1, 7):
+        config = load_night_config(night)
+        derived = derivations.do_nothing_survival(config)
+        episodes = SURVIVAL_EPISODES if night == 1 else 2000
+        measured = _survival(night, DoNothing, episodes)
+        rates.append(measured)
+        sigma = max((derived * (1 - derived) / episodes) ** 0.5, 1.0 / episodes)
+        deviation = abs(measured - derived) / sigma
+        checks.append(
+            Check(
+                "v0.3-8.2 survival",
+                f"night {night}: measured {measured:.4f}, derived {derived:.4f}, "
+                f"{deviation:.2f} sigma at n={episodes}",
+                deviation <= SIGMA_TOLERANCE,
+            )
+        )
+    checks.append(
+        Check(
+            "v0.3-8.2 survival",
+            f"non-increasing across nights: {[round(r, 4) for r in rates]}",
+            all(a >= b for a, b in pairwise(rates)),
+        )
+    )
+    for night in (3, 4, 5, 6):
+        rhythm = _survival(night, Rhythm, 300)
+        nothing = _survival(night, DoNothing, 300)
+        checks.append(
+            Check(
+                "v0.3-8.2 rhythm",
+                f"night {night}: rhythm {rhythm:.3f} beats do_nothing {nothing:.3f}",
+                rhythm > nothing,
+            )
+        )
+    return checks
+
+
+def _latency_config(level: int) -> NightConfig:
+    config = _only(load_night_config(6), EntityId.WARDEN, [level, 0, 0, 0])
+    return replace(
+        config,
+        timing=replace(
+            config.timing,
+            hour_durations_s=tuple(d * NIGHT_SCALE for d in config.timing.hour_durations_s),
+        ),
+    )
+
+
+def check_warden_latency() -> list[Check]:
+    """8.3: STAGE to E_CORNER latency against the derived curve."""
+    residuals = []
+    checks = []
+    means = []
+    for level in range(1, 11):
+        config = _latency_config(level)
+        predicted = derivations.warden_latency_s(config, level)
+        total = reached = 0
+        for seed in range(LATENCY_EPISODES):
+            sim = _sim(config, seed)
+            sim.state.drifter.node = Node.COMMONS
+            sim.state.prowler.node = Node.COMMONS
+            while not sim.state.terminated and sim.state.warden.node is not Node.E_CORNER:
+                sim.step(Action.NOOP)
+            if sim.state.warden.node is Node.E_CORNER:
+                total += sim.clock.time_s(sim.state.tick)
+                reached += 1
+        measured = total / reached
+        means.append(measured)
+        residuals.append((measured - predicted) / predicted)
+        checks.append(
+            Check(
+                "v0.3-8.3 latency",
+                f"AI {level:>2}: measured {measured:7.2f}s, derived {predicted:7.2f}s, "
+                f"{residuals[-1]:+.1%}, reached {reached}/{LATENCY_EPISODES}",
+                abs(residuals[-1]) <= LATENCY_BAND and reached >= LATENCY_EPISODES * 0.95,
+            )
+        )
+    average = sum(abs(r) for r in residuals) / len(residuals)
+    checks.append(
+        Check(
+            "v0.3-8.3 latency",
+            f"mean absolute residual {average:.2%}",
+            average <= LATENCY_MEAN_BAND,
+        )
+    )
+    checks.append(
+        Check(
+            "v0.3-8.3 latency",
+            "monotonically decreasing in AI level",
+            all(a > b for a, b in pairwise(means)),
+        )
+    )
+    return checks
+
+
+def _peek_action(period_s: float | None, step: int) -> Action:
+    if period_s is None:
+        return Action.NOOP
+    steps = round(period_s / 0.5)
+    return action_for_camera(Node.COVE) if step % steps == 0 else Action.MONITOR_DOWN
+
+
+def check_sprinter_curve() -> list[Check]:
+    """8.4: the hard zero, and agreement with the unfrozen-fraction curve."""
+    checks = []
+    base = load_night_config(6)
+    bound = derivations.sprinter_hard_zero_bound_s(base)
+
+    for period in HARD_ZERO_PERIODS:
+        config = _only(base, EntityId.SPRINTER, [0, 0, 0, 20])
+        attacks = 0
+        for seed in range(40):
+            sim = _sim(config, seed)
+            sim.state.office.door_left = True
+            step = 0
+            while not sim.state.terminated:
+                sim.step(_peek_action(period, step))
+                step += 1
+            attacks += sim.state.sprinter.bang_count
+        checks.append(
+            Check(
+                "v0.3-8.4 hard zero",
+                f"k={period}s (bound {bound}s): {attacks} attacks over 40 seeds",
+                attacks == 0,
+            )
+        )
+
+    for period in HARD_ZERO_PERIODS + CURVE_PERIODS:
+        config = _only(base, EntityId.SPRINTER, [0, 0, 0, 20])
+        config = replace(
+            config,
+            entities=replace(
+                config.entities,
+                sprinter=replace(config.entities.sprinter, stages_to_arm=NEVER_ARMS),
+            ),
+        )
+        predicted = derivations.sprinter_unfrozen_fraction(config, period)
+        unfrozen = total = 0
+        for seed in range(30):
+            sim = _sim(config, seed)
+            counters = [0, 0]
+
+            def hook(state, _action, s=sim, c=counters):
+                if not state.blackout:
+                    c[1] += 1
+                    c[0] += 0 if s.sprinter.is_frozen(state) else 1
+
+            sim.on_tick = hook
+            step = 0
+            while not sim.state.terminated:
+                sim.step(_peek_action(period, step))
+                step += 1
+            unfrozen += counters[0]
+            total += counters[1]
+        measured = unfrozen / total
+        checks.append(
+            Check(
+                "v0.3-8.4 curve",
+                f"k={'inf' if period is None else period}: measured {measured:.4f}, "
+                f"derived {predicted:.4f}",
+                abs(measured - predicted) <= UNFROZEN_BAND,
+            )
+        )
+    return checks
+
+
+def check_blackout() -> list[Check]:
+    """8.7: blackout survivability against the derivation."""
+    config = _no_entities(load_night_config(1))
+    derived = derivations.blackout_survival(config, 35.0)
+    causes: dict[str, int] = {}
+    for seed in range(BLACKOUT_EPISODES):
+        sim = _sim(config, seed)
+        while sim.state.tick < BLACKOUT_ONSET_TICK:
+            sim.step(Action.NOOP)
+        apply_onset(sim.state)
+        sim.run()
+        cause = sim.state.cause.value if sim.state.cause else "NONE"
+        causes[cause] = causes.get(cause, 0) + 1
+    measured = causes.get("SURVIVED", 0) / BLACKOUT_EPISODES
+    sigma = (derived * (1 - derived) / BLACKOUT_EPISODES) ** 0.5
+    deviation = abs(measured - derived) / sigma
+    return [
+        Check(
+            "v0.3-8.7 blackout",
+            f"non-vacuity: both outcomes occur - {causes}",
+            causes.get("SURVIVED", 0) > 0 and causes.get("KILLED_BLACKOUT", 0) > 0,
+        ),
+        Check(
+            "v0.3-8.7 blackout",
+            f"measured {measured:.4f}, derived {derived:.4f}, {deviation:.2f} sigma "
+            f"at n={BLACKOUT_EPISODES}",
+            deviation <= SIGMA_TOLERANCE,
+        ),
+    ]
+
+
 def main() -> int:
     """Run every check and print a table."""
     checks: list[Check] = []
@@ -421,6 +638,10 @@ def main() -> int:
         check_stage_lock,
         check_night_one_survival,
         check_monitor_down_probe,
+        check_do_nothing_survival,
+        check_warden_latency,
+        check_sprinter_curve,
+        check_blackout,
     ):
         checks += step()
 

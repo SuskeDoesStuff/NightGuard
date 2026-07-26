@@ -1,0 +1,146 @@
+/* NightGuard trace viewer. PROJECT.md 9.1: target width 680-900 px, four horizontal bands. */
+
+:root {
+  --bg: #14161c;
+  --panel: #1c1f27;
+  --line: #2c313d;
+  --ink: #d7dbe4;
+  --dim: #838b9c;
+  --west: #7aa2f7;
+  --east: #e0af68;
+  --cove: #bb9af7;
+  --alert: #f7768e;
+  --ok: #9ece6a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  padding: 12px;
+  max-width: 900px;
+  min-width: 680px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* --- header band --- */
+
+#bar {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.cell { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.cell.grow { flex: 1; }
+.label { color: var(--dim); text-transform: uppercase; font-size: 10px; letter-spacing: .08em; }
+
+.meter {
+  flex: 1;
+  height: 10px;
+  min-width: 90px;
+  background: #0f1116;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.meter > div { height: 100%; transition: width .08s linear; }
+.meter > div.high { background: var(--ok); }
+.meter > div.mid { background: var(--east); }
+.meter > div.low { background: var(--alert); }
+
+input[type="file"] { color: var(--dim); font: inherit; max-width: 170px; }
+
+/* --- map band --- */
+
+main { display: grid; gap: 10px; margin-top: 10px; }
+
+#map-panel, .panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+#map { width: 100%; height: auto; display: block; }
+
+.edge { stroke: var(--line); stroke-width: 1.5; }
+.edge.bypass { stroke: var(--cove); stroke-dasharray: 5 4; opacity: .7; }
+
+.node rect { fill: #191c24; stroke: var(--line); stroke-width: 1; }
+.node.selected rect { stroke: var(--east); stroke-width: 2.5; }
+.node text {
+  fill: var(--dim);
+  font-size: 9px;
+  text-anchor: middle;
+  letter-spacing: .04em;
+}
+.node text.tokens { fill: var(--ok); font-size: 11px; font-weight: 700; }
+
+.legend { margin: 6px 0 0; color: var(--dim); font-size: 11px; }
+.chip.truth { color: var(--ok); font-weight: 700; }
+
+/* --- panels band --- */
+
+#panels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+
+.panel h2 {
+  margin: 0 0 6px;
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 600;
+}
+
+dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 0; }
+dt { color: var(--dim); }
+dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+dd.on { color: var(--east); }
+dd.alert { color: var(--alert); font-weight: 700; }
+dd.cause { color: var(--ok); font-weight: 700; }
+
+/* --- transport band --- */
+
+#transport {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+button {
+  background: #232733;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { border-color: var(--dim); }
+
+.scrub { position: relative; flex: 1; }
+#scrub { width: 100%; margin: 0; }
+
+#markers { position: relative; height: 7px; margin-top: 1px; }
+.marker {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 7px;
+  background: var(--alert);
+  cursor: pointer;
+}
+
+#status { color: var(--dim); font-size: 11px; margin: 8px 2px 0; }

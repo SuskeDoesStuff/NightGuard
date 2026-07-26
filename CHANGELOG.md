@@ -20,6 +20,100 @@
   distinct full state signatures over forty seeds, matching `test_trace.py`'s threshold. A check
   satisfied by two outcomes in thirty is nearly as vacuous as what §8.0 exists to prevent.
 
+### Derivations (written before measuring)
+
+Every statistical target in §8 is derived analytically here first. If a measurement disagrees, one
+of the two is wrong and finding out which is the point; neither gets adjusted to match the other.
+
+#### §8.2, nights 2–6 — SPRINTER successes against the arming threshold
+
+Extending the night-1 derivation. Opportunities fire at `ceil(n × 1503 / 30)` ticks; SPRINTER's
+level changes at 3AM (t = 268 s) and 4AM (t = 357 s); and the 3rd success must land by t = 510 s
+for the 25 s forced attack to resolve before dawn. That gives **53 / 18 / 30** opportunities at the
+starting level, +1 and +2 respectively.
+
+| Night | SPRINTER levels | E[successes] | P(survive) |
+|---|---|---|---|
+| 1 | 0 / 1 / 2 | 3.900 | **0.2397** |
+| 2 | 1 / 2 / 3 | 8.950 | **0.0046** |
+| 3 | 2 / 3 / 4 | 14.000 | < 0.0001 |
+| 4 | 6 / 7 / 8 | 34.200 | < 0.0001 |
+| 5 | 5 / 6 / 7 | 29.150 | < 0.0001 |
+| 6 | 16 / 17 / 18 | 84.700 | < 0.0001 |
+
+Night 5 sits below night 4 because SPRINTER starts at 5 rather than 6; both are far past the
+threshold, so survival is indistinguishable from zero either way. This is why §8.2 permits ties.
+
+#### §8.3 — STAGE→E_CORNER latency
+
+Per hop: `E[hop] = C + Δ(C) + (20/L − 1) × 3.02`, where `C` is the countdown quantised up to a
+tick and `Δ(C) = 3.02 × (⌊C/3.02⌋ + 1) − C` is the wait from the countdown expiring to the next
+opportunity firing. Five hops.
+
+**Δ is a credit, not a penalty**, and an earlier draft had the sign backwards. The countdown
+consumes part of an inter-firing interval, so the next opportunity arrives *sooner* than a full
+3.02 s after the move — adding a phase penalty moves the model away from the truth. At AI 10 there
+is no countdown and therefore no phase effect at all, and `Δ(0) = 3.02` recovers the naive value.
+
+| AI | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| countdown (ticks) | 150 | 134 | 117 | 100 | 84 | 67 | 50 | 34 | 17 | 0 |
+| Δ (s) | 0.10 | 1.70 | 0.38 | 2.08 | 0.66 | 2.36 | 1.04 | 2.64 | 1.32 | 3.02 |
+| **predicted (s)** | **362.4** | **211.4** | **146.0** | **120.8** | **90.6** | **80.5** | **58.2** | **52.9** | **33.6** | **30.2** |
+
+Monotonically decreasing, with a sawtooth from Δ riding on the trend. AI 1's 362 s is most of a
+535 s night, so this is measured on a lengthened night to avoid a censored mean (§8.3).
+
+#### §8.4 — unfrozen fraction
+
+SPRINTER is frozen while the monitor is up and for a `Uniform[0.83, 16.67] s` window sampled on
+each monitor-down edge. For a policy peeking 0.5 s every `k` seconds the unfrozen time per cycle is
+`max(0, k − 0.5 − U)`, so the unfrozen fraction is `E[max(0, k − 0.5 − U)] / k`.
+
+| k (s) | 0.5 | 1.0 | 1.5 | 2 | 4 | 6 | 8 | 10 | 15 | 20 | ∞ |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| unfrozen | 0.0000 | 0.0000 | 0.0006 | 0.0071 | 0.0563 | 0.1147 | 0.1755 | 0.2373 | 0.3932 | 0.5375 | 1.0000 |
+
+The hard-zero bound is **1.4 s**, not the continuous 1.33 s: immunity is sampled in grid units and
+249 units ceilings to 9 ticks, so the realised minimum window is 0.9 s. And `k` must be a whole
+number of 0.5 s decision steps, so only `{0.5, 1.0}` are both reachable and inside the zero region.
+
+#### §8.7 — blackout survival
+
+Under §3.11's three settled conventions — first roll one interval in, the 20 s guarantee replacing
+the roll at 20 s, and a kill roll on the boundary counting — each of Approach and Song completes
+with mass `{5: 0.2, 10: 0.16, 15: 0.128, 20: 0.512}`, and Kill rolls at +2, +4, … Convolving:
+
+| Budget | 20 s | 25 s | 30 s | **35 s** | 40 s | 45 s |
+|---|---|---|---|---|---|---|
+| P(survive) | 0.9501 | 0.8977 | 0.7736 | **0.6148** | 0.4707 | 0.2833 |
+
+**0.6148** is §8.7's target at power forced to zero at t = 500 s. The strict-boundary reading gives
+0.6367, which is 4.5σ apart at n = 10,000.
+
+### Measurements against those derivations
+
+Every one agrees. Derivations were written above before any of this was run.
+
+| Assertion | Derived | Measured | Agreement |
+|---|---|---|---|
+| §8.2 night 1 | 0.2397 | 0.2373 (n=10,000) | 0.55σ |
+| §8.2 night 2 | 0.0046 | 0.0060 (n=2,000) | 0.90σ |
+| §8.2 nights 3–6 | < 0.0001 | 0.0000 | within sampling |
+| §8.7 blackout, 35 s | 0.6148 | 0.6141 (n=10,000) | 0.15σ |
+| §8.4 hard zero, k ∈ {0.5, 1.0} | 0 attacks | 0 attacks over 40 seeds | exact |
+| §8.4 curve, k = 2 … ∞ | see table | max absolute error 0.016 | within band |
+| §8.3 latency, AI 1–10 | see table | mean absolute residual **2.51%** | within band |
+
+**§8.3's residual is systematic, not statistical.** It spans −2.2% to +5.5% with z-scores of 1 to 5
+at n=600, so it is a modelling gap rather than noise: the derivation is continuous while the
+simulation quantises both the firing schedule and the countdown upward to whole ticks. The residual
+has no consistent sign across levels and largely cancels, which is why the aggregate assertion
+(mean absolute residual ≤ 4%) is much tighter than the per-level band (≤ 8%). **§8.4's residual is
+consistently negative** for the same reason and in the expected direction: ceiling the immunity
+window makes it slightly longer, so slightly less of the night is unfrozen than the continuous
+model predicts.
+
 ### Reference policy series, post-tuning (A6)
 
 400 seeds per night, `rhythm` frozen at `peek_every_steps=12`:

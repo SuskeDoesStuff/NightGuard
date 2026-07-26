@@ -660,6 +660,36 @@ On blackout:
 The sequence can take 40+ seconds, so reaching 6AM after a blackout is genuinely possible
 and must be reachable in simulation.
 
+**Roll schedule.** Three conventions were left implicit and each of them moves the measured
+survival rate materially. All three are settled here and recorded in §10.
+
+1. **The first roll of every phase happens one interval in, not at t=0.** Approach and Song
+   first roll 5.0 s after the phase begins; Kill first rolls 2.0 s after it begins. A phase
+   therefore always takes at least one full interval, and the 20 s cap is a genuine ceiling
+   rather than one of five equiprobable branches. Rolling at t=0 instead moves §8.7 from
+   **0.6148 to 0.4389**.
+2. **The 20 s guarantee replaces the roll at 20 s, it does not follow one.** Approach and Song
+   roll at 5, 10 and 15 s; if all three fail, the phase advances at 20 s with certainty. There
+   is no roll at 20 s. The resulting completion mass per phase is exact:
+
+   | Completes at | 5 s | 10 s | 15 s | 20 s |
+   |---|---|---|---|---|
+   | Probability | 0.200 | 0.160 | 0.128 | 0.512 |
+
+   The 0.512 at 20 s is `0.8³`, the guarantee absorbing all three failures.
+3. **A kill roll landing exactly on the survival boundary counts.** If the agent's remaining
+   budget is exactly a multiple of the kill interval, the roll at that instant is taken and can
+   kill. The strict reading — rolls strictly before the boundary — moves §8.7 from **0.6148 to
+   0.6367**, which is 4.5σ at n = 10,000, so a correct implementation would fail §8.7 on
+   convention alone and the failure would look like a blackout bug.
+
+**Phase 1 starts from the onset tick,** not from the tick on which power first went negative.
+Power is detected at or below zero at §3.13 step 3 and onset is applied in the same tick, so the
+two coincide today; stating it fixes the reference point should they ever diverge.
+
+Reaching `t = 535.0 s` mid-sequence is `SURVIVED`, per §3.1. Blackout is not a separate outcome:
+only being killed during it is, and that is `KILLED_BLACKOUT` (§3.12).
+
 ### 3.12 Termination
 
 | Cause | Enum value |
@@ -818,7 +848,8 @@ One JSONL file per episode. A header record, then one record per **sim tick**, t
 
 ```json
 {"type": "tick", "t": 442, "time_s": 44.2, "hour": 0, "power": 38.4,
- "doors": [true, false], "lights": [false, false],
+ "doors": [true, false], "jams": [false, false], "blackout": null,
+ "lights": [false, false],
  "monitor": {"up": true, "cam": 5},
  "entities": {
    "warden":   {"node": 8,  "countdown_ticks": 61, "in_office": false},
@@ -852,6 +883,12 @@ One JSONL file per episode. A header record, then one record per **sim tick**, t
   most informative one. The complete per-tick list stays in core state for debugging. A consequence
   worth knowing: `door_jam_left` and `door_jam_right` never appear on their own, because a jam is
   always coincident with an invasion and a jammed door is already visible in the office panel.
+
+- `jams` and `blackout` were added in trace version **1.1** (v0.3). §9.1 requires a jammed door to
+  read `JAMMED` rather than `open`, and requires the active blackout phase to be visible; version
+  1.0 carried neither, and the blackout sequence did not exist when that shape was frozen. This is
+  the one permitted extension — recorded in §10 — and v1.2's viewer must not need another. Readers
+  should treat a missing key as `null`/`false` so 1.0 traces still load.
 
 - `belief`, `policy` and `metrics.belief_error` are produced by `env/`, which does not exist until
   v1.0. From v0.2 they are emitted as `null` with their keys present, so the shape is stable from
@@ -1354,6 +1391,13 @@ comment at its point of use.
 | Is WARDEN's `E_CORNER` "attack" a kill or a move? | A move into `OFFICE`, gated on `monitor_up`. The kill is the 25%/s roll afterwards, while the monitor is down. | Read as a kill, `OFFICE` is unreachable and the 25%/s mechanic is dead code. CeriW: WARDEN "cannot enter your office when your camera is down." |
 | Timing grid resolution | `time_units_per_second: 300` = `lcm(60, 100)`. | The countdown table divides by 60; the opportunity intervals are two-decimal. 300 is the coarsest grid on which both are exact. Not a frame rate: the `/60` becomes an integer multiply, which strengthens the frame-rate lock above rather than weakening it. |
 | §8.2's night-1 `do_nothing` threshold | Replaced by agreement with the analytic derivation (0.2397). | The original ≥ 0.8 is unreachable against a faithful SPRINTER, and an agreement test can fail in both directions. |
+| Does a success restart an in-flight WARDEN countdown? | No. It is ignored. | §3.4 is silent. WARDEN is already committed to moving; repeated successes indefinitely postponing a move is the opposite of what an AI level means, and it would make higher levels non-monotonically slower in exactly the regime where §8.3 asserts monotonic improvement. |
+| When does a blackout phase first roll? | One interval in: 5.0 s for Approach and Song, 2.0 s for Kill. | A phase always takes at least one full interval, so the 20 s cap is a real ceiling. Rolling at t=0 moves §8.7 from 0.6148 to 0.4389. |
+| Does the 20 s guarantee replace the roll at 20 s? | Replaces it. Rolls at 5, 10, 15; guaranteed advance at 20. | Gives the exact completion mass `{5: 0.2, 10: 0.16, 15: 0.128, 20: 0.512}`. |
+| Does a kill roll on the survival boundary count? | Yes, inclusive. | The strict reading moves §8.7 from 0.6148 to 0.6367 — 4.5σ at n=10,000 — so a correct implementation would fail on convention alone and the failure would look like a bug. |
+| §8.4's test family and flat region | `k ∈ {0.5, 1.0}` hard zero, bound stated as 1.4 s; curve family `{1.5, 2, 4, 6, 8, 10, 15, 20, ∞}`. | `k` must be a whole number of 0.5 s decision steps, so 0.75 and 1.25 are unreachable; and immunity ceilings to 9 ticks, so the realised minimum window is 0.9 s, not 0.83 s. |
+| §5's frozen shape vs §9.1's viewer requirements | Extend to trace 1.1 with `jams` and `blackout`. | §9.1 requires `JAMMED` to be distinguishable from `open` and the blackout phase to be visible, and 1.0 carried neither. Blackout did not exist when the shape was frozen, so this is an addition rather than a change; readers treat missing keys as absent. No further extension before v1.2. |
+| §8.3's censored mean at low AI | Measure on a lengthened night so every level completes. | At AI 1 the walk is ~335 s of a 535 s night, so the sample mean is censored and biased downward for reasons unrelated to fidelity. §8.3 is already synthetic. |
 
 ---
 

@@ -30,7 +30,7 @@ from ..core.sim import NightSim
 from ..core.state import Action, SimState
 from ..core.topology import Topology
 
-TRACE_VERSION = "1.0"
+TRACE_VERSION = "1.1"
 
 # PROJECT.md 5's `event` field holds a single value, but several events genuinely co-occur on one
 # tick — an invasion always jams its door on the same tick, and a death often follows the event
@@ -138,6 +138,11 @@ def tick_record(
         "hour": sim.clock.hour_at_tick(state.tick),
         "power": round(max(0.0, state.power_pct), POWER_DECIMALS),
         "doors": [office.door_left, office.door_right],
+        # Added in trace 1.1. 9.1 requires a jammed door to read JAMMED rather than open, and the
+        # blackout phase to be visible; the 1.0 shape carried neither, and blackout did not exist
+        # when that shape was frozen. See PROJECT.md 5 and 10.
+        "jams": [office.jam_left, office.jam_right],
+        "blackout": (None if state.blackout_state is None else state.blackout_state.phase.name),
         "lights": [office.light_left, office.light_right],
         "monitor": {
             "up": office.monitor_up,

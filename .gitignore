@@ -9,3 +9,7 @@ dist/
 .ruff_cache/
 traces/
 *.jsonl
+
+# Generated traces and viewer samples
+src/nightguard/viewer/samples/
+src/nightguard/viewer/trace.jsonl

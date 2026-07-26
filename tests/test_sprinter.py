@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
+from itertools import pairwise
 
 import pytest
 
-from nightguard.core import Action, EntityId, NightSim, TerminationCause
-from tests.conftest import step_until
+from nightguard import derivations
+from nightguard.core import (
+    Action,
+    EntityId,
+    NightConfig,
+    NightSim,
+    Node,
+    TerminationCause,
+    Topology,
+    action_for_camera,
+    load_night_config,
+)
+from tests.conftest import step_until, with_only
 
 SPRINTER_ONLY = [EntityId.SPRINTER]
 
@@ -215,3 +228,126 @@ def test_attack_frequency_increases_with_camera_gap(make_sim: Callable[..., Nigh
 
     assert measured[2.0] <= measured[6.0] <= measured[20.0], measured
     assert measured[20.0] > measured[2.0], measured
+
+
+# --- PROJECT.md 8.4: attack frequency versus camera duty ---------------------------------------
+
+# The unfrozen-fraction curve lives in nightguard.derivations, derived in CHANGELOG from 3.7's
+# freeze and immunity rules. Two constraints on the family that the original 8.4 wording missed:
+# `k` must be a whole number of 0.5 s decision steps, so 0.75 and 1.25 are unreachable; and the
+# hard-zero bound is 1.4 s rather than the continuous 1.33 s, because immunity is sampled in grid
+# units and 249 units ceilings to 9 ticks.
+HARD_ZERO_PERIODS = (0.5, 1.0)
+CURVE_PERIODS = (1.5, 2.0, 4.0, 6.0, 10.0, 20.0, None)
+UNFROZEN_BAND = 0.02  # absolute; the residual is tick quantisation, which shortens the window
+NEVER_ARMS = 10**6  # isolates charging: with no arming there are no armed-but-idle ticks
+
+
+def peek_config(period_s: float | None, level: int = 20, stages: int | None = None) -> NightConfig:
+    """SPRINTER alone at a fixed level, optionally unable to arm."""
+    config = load_night_config(6)
+    config = replace(config, ai=replace(config.ai, levels=(0, 0, 0, level), escalation=()))
+    config = with_only(config, [EntityId.SPRINTER])
+    if stages is not None:
+        config = replace(
+            config,
+            entities=replace(
+                config.entities, sprinter=replace(config.entities.sprinter, stages_to_arm=stages)
+            ),
+        )
+    return config
+
+
+def peek_action(period_s: float | None, step: int, config: NightConfig) -> Action:
+    """One step of a policy that raises the monitor for one step every ``period_s`` seconds."""
+    if period_s is None:
+        return Action.NOOP
+    steps = round(period_s / config.timing.decision_step_s)
+    return action_for_camera(Node.COVE) if step % steps == 0 else Action.MONITOR_DOWN
+
+
+def measure_unfrozen(period_s: float | None, seeds: int, topology: Topology) -> float:
+    """Fraction of non-blackout ticks on which SPRINTER is unfrozen.
+
+    Sampled per *tick* via the trace hook, not per decision step: a step is five ticks, and at
+    small `k` the unfrozen window is a fraction of a step, so per-step sampling misreads it badly.
+    """
+    config = peek_config(period_s, stages=NEVER_ARMS)
+    unfrozen = total = 0
+    for seed in range(seeds):
+        sim = NightSim.from_seed(config, seed=seed, topology=topology)
+        counters = [0, 0]
+
+        def hook(state, _action, s=sim, c=counters):
+            if not state.blackout:
+                c[1] += 1
+                c[0] += 0 if s.sprinter.is_frozen(state) else 1
+
+        sim.on_tick = hook
+        step = 0
+        while not sim.state.terminated:
+            sim.step(peek_action(period_s, step, config))
+            step += 1
+        unfrozen += counters[0]
+        total += counters[1]
+    return unfrozen / total
+
+
+def measure_attacks(period_s: float | None, seeds: int, topology: Topology) -> float:
+    """Mean SPRINTER attacks per night, with the left door shut so a night survives its bangs."""
+    config = peek_config(period_s)
+    attacks = 0
+    for seed in range(seeds):
+        sim = NightSim.from_seed(config, seed=seed, topology=topology)
+        sim.state.office.door_left = True
+        step = 0
+        while not sim.state.terminated:
+            sim.step(peek_action(period_s, step, config))
+            step += 1
+        attacks += sim.state.sprinter.bang_count
+    return attacks / seeds
+
+
+@pytest.mark.parametrize("period_s", HARD_ZERO_PERIODS)
+def test_no_attacks_below_the_hard_zero_bound(period_s: float, topology: Topology) -> None:
+    """PROJECT.md 8.4's sharpest assertion: deterministic, not statistical.
+
+    Below the bound the unfrozen window cannot open at all, so a single attack on any seed means
+    either the freeze or the immunity window is wrong.
+    """
+    config = peek_config(period_s)
+    assert period_s <= derivations.sprinter_hard_zero_bound_s(config)
+    assert measure_attacks(period_s, 40, topology) == 0.0
+
+
+def test_the_hard_zero_bound_is_the_quantised_one() -> None:
+    """1.4 s, not the continuous 1.33 s, because immunity ceilings to whole ticks."""
+    config = load_night_config(6)
+    assert derivations.sprinter_hard_zero_bound_s(config) == pytest.approx(1.4)
+
+
+def test_every_period_in_the_family_is_reachable() -> None:
+    """`k` must be a whole number of decision steps; 0.75 and 1.25 are not expressible."""
+    step = load_night_config(6).timing.decision_step_s
+    for period in HARD_ZERO_PERIODS + tuple(p for p in CURVE_PERIODS if p is not None):
+        assert abs(period / step - round(period / step)) < 1e-9, period
+
+
+@pytest.mark.slow
+def test_unfrozen_fraction_agrees_with_the_derivation(topology: Topology) -> None:
+    """PROJECT.md 8.4's replacement for the untestable flatness assertion."""
+    report = []
+    for period_s in HARD_ZERO_PERIODS + CURVE_PERIODS:
+        config = peek_config(period_s)
+        predicted = derivations.sprinter_unfrozen_fraction(config, period_s)
+        measured = measure_unfrozen(period_s, 30, topology)
+        report.append(f"k={period_s}: {measured:.4f} vs {predicted:.4f}")
+        assert abs(measured - predicted) <= UNFROZEN_BAND, "; ".join(report)
+
+
+@pytest.mark.slow
+def test_attacks_increase_with_the_camera_gap(topology: Topology) -> None:
+    """The original 8.4 direction, kept: longer gaps mean more attacks."""
+    measured = [measure_attacks(period, 25, topology) for period in (2.0, 6.0, 20.0, None)]
+    assert all(a <= b for a, b in pairwise(measured)), measured
+    assert measured[-1] > measured[0], measured

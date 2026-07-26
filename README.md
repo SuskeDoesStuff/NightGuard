@@ -9,10 +9,10 @@ information and one of its costliest actions.
 
 ## Status
 
-**v0.2 — Full roster.** All four entities (`WARDEN`, `DRIFTER`, `PROWLER`, `SPRINTER`), the JSONL
-trace format, the audio channel, and the scripted reference policies. Blackout is still a
-placeholder that terminates immediately; the three-phase sequence lands in v0.3. No Gymnasium
-wrapper, no observations, no reward — `env/actions.py` is the only `env/` code.
+**v0.3 — Fidelity lock.** The full three-phase blackout, the §8 validation suite, and a minimal
+trace viewer. Every statistical assertion is an agreement test against an analytic derivation
+recorded in `CHANGELOG.md` before it was measured. No Gymnasium wrapper, no observations, no
+reward — `env/actions.py` is the only `env/` code.
 
 ## Install
 
@@ -39,13 +39,13 @@ print(result.cause, result.final_power_pct, sim.clock.decision_steps)
 
 | Task | Command |
 |---|---|
-| Test | `pytest` |
+| Test | `pytest` (fast) · `pytest -m slow` (statistical) |
 | Lint | `ruff check && ruff format --check` |
-| Types | `mypy --strict src/nightguard/core src/nightguard/env` |
+| Types | `mypy --strict src/nightguard` |
 | Validate | `python scripts/validate.py` |
 
-`validate.py` checks the v0.1 and v0.2 exit criteria from `PROJECT.md` §7, printing each
-measured value alongside its target.
+`validate.py` checks every v0.1, v0.2 and v0.3 exit criterion from `PROJECT.md` §7 and the whole
+of §8, printing each measured value alongside its target.
 
 ## Layout
 
@@ -54,6 +54,8 @@ src/nightguard/core/       Pure simulation. No gymnasium, no torch, no global ra
 src/nightguard/trace/      JSONL serialisation of ground truth. Depends on core only.
 src/nightguard/policies/   Scripted reference policies: do_nothing, rhythm, monitor_down.
 src/nightguard/env/        Gymnasium layer. Only the action space until v1.0.
+src/nightguard/viewer/     Static HTML/JS trace viewer. No server, no build step.
+src/nightguard/derivations.py  Analytic predictions for the section 8 suite.
 configs/                   Topology and night presets. All numeric constants live here.
-scripts/                   Exit-criteria validation.
+scripts/                   Exit-criteria validation and trace export.
 ```

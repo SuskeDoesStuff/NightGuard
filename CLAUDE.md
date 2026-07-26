@@ -18,9 +18,9 @@ in §7 where they conflict.
 
 ## Commands
 The venv is at `.venv/` and is gitignored; prefix with `.venv/bin/` or activate it first.
-- Test:   `pytest`
+- Test:   `pytest` (fast) and `pytest -m slow` (the statistical measurements)
 - Lint:   `ruff check && ruff format --check`
-- Types:  `mypy --strict src/nightguard/core src/nightguard/env`
+- Types:  `mypy --strict src/nightguard`
 - Validate: `python scripts/validate.py`  (exit criteria for the current milestone)
 
 All four must pass before any milestone is called done. See PROJECT.md §11.
@@ -31,15 +31,16 @@ All four must pass before any milestone is called done. See PROJECT.md §11.
 |---|---|---|
 | v0.1 | Clock, power, office controls, DRIFTER + PROWLER | **Done** — tag `v0.1`, commit `19362e1` |
 | v0.2 | WARDEN + SPRINTER, trace format, audio, reference policies | **Done** — tag `v0.2` |
-| v0.3 | Three-phase blackout, validation suite (§8), minimal viewer | **Current** |
+| v0.3 | Three-phase blackout, validation suite (§8), minimal viewer | **Done** — tag `v0.3` |
 | v1.0 | Gymnasium wrapper, wrappers, vectorised runner | Not started |
 | v1.1 | RecurrentPPO baseline | Not started |
 | v1.2 | Replay viewer | Not started |
 | v2.0 | Randomised configs, benchmark table | Not started |
 | v2.1 | Packaging and release | Not started |
 
-Do not begin a version until the previous version's exit criteria pass. v0.3 is the critical-path
-milestone: everything after it depends on the simulator being correct.
+Do not begin a version until the previous version's exit criteria pass. v0.3 was the critical-path
+milestone; the simulator is now fidelity-locked and every §8 assertion is an agreement test against
+an analytic derivation in `CHANGELOG.md`.
 
 ## Evidence discipline
 
@@ -66,6 +67,11 @@ PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning.
   must match the analytic **0.2397** within binomial error (measured 0.2373 at n=10,000). Nights
   2–6 are near zero by design, because SPRINTER is the only kill path for a monitor-down policy.
 - **`rhythm` is frozen.** Tuned once by sweep; do not retune it to chase a number.
+- **Blackout rolls one interval in; the 20 s guarantee replaces the roll; a kill roll on the
+  boundary counts.** All three settled in §3.11 and §10; each alternative moves §8.7 materially.
+- **A success during an in-flight WARDEN countdown is ignored**, not a restart.
+- **Trace shape is 1.1.** `jams` and `blackout` were added for the viewer; no further extension
+  before v1.2.
 
 ## Traps
 

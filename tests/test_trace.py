@@ -75,6 +75,8 @@ class TestShape:
             "hour",
             "power",
             "doors",
+            "jams",
+            "blackout",
             "lights",
             "monitor",
             "entities",

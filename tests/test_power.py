@@ -78,10 +78,13 @@ def test_two_doors_all_night_blacks_out_inside_the_5am_block(
 
     result = sim.run()
 
-    assert result.cause is TerminationCause.KILLED_BLACKOUT
-    assert result.ticks == 4705
-    assert result.time_s == pytest.approx(470.5, abs=TOLERANCE)
-    assert sim.clock.hour_at(result.time_s) == 5
+    onset = [tick for tick, name in result.events if name == "blackout"]
+    assert onset == [4705], result.events
+    assert sim.clock.time_s(onset[0]) == pytest.approx(470.5, abs=TOLERANCE)
+    assert sim.clock.hour_at(sim.clock.time_s(onset[0])) == 5
+    # From v0.3 blackout is a survivable absorbing state, not a termination (PROJECT.md 3.11), so
+    # the episode continues into the three-phase sequence rather than ending here.
+    assert result.cause in {TerminationCause.SURVIVED, TerminationCause.KILLED_BLACKOUT}
 
 
 def test_toggling_both_doors_costs_two_steps_of_ramp_up(make_sim: Callable[..., NightSim]) -> None:
@@ -89,8 +92,8 @@ def test_toggling_both_doors_costs_two_steps_of_ramp_up(make_sim: Callable[..., 
     sim = make_sim(night=1, seed=7, only=())
     result = sim.run([Action.TOGGLE_DOOR_LEFT, Action.TOGGLE_DOOR_RIGHT])
 
-    assert result.cause is TerminationCause.KILLED_BLACKOUT
-    assert result.ticks == 4708
+    onset = [tick for tick, name in result.events if name == "blackout"]
+    assert onset == [4708], result.events
 
 
 class TestActiveUnits:

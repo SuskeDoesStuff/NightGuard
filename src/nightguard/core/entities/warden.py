@@ -95,6 +95,14 @@ class Warden:
         if warden.in_office:
             return
 
+        # A success while a countdown is in flight is ignored. PROJECT.md 3.4 is silent; §10
+        # settles it. WARDEN is already committed to moving, and a mechanic where repeated
+        # successes indefinitely postpone a move is the opposite of what an AI level means — it
+        # would make higher levels non-monotonically slower, in exactly the regime where 8.3
+        # asserts monotonic improvement.
+        if warden.counting_down:
+            return
+
         if warden.node == self.corner:
             self._resolve_corner(state)
             return

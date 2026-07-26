@@ -19,6 +19,7 @@ import numpy as np
 from numpy.random import Generator
 
 from . import blackout, power
+from .blackout import BlackoutSequence
 from .clock import Clock
 from .config import EscalationEvent, LevelSpec, NightConfig, UniformChoice
 from .entities.base import DoorEntity, opportunity_succeeds
@@ -99,6 +100,7 @@ class NightSim:
         self.drifter = Drifter(config.entities.drifter, self.clock, config.office)
         self.prowler = Prowler(config.entities.prowler, self.clock, config.office)
         self.sprinter = Sprinter(config.entities.sprinter, self.clock)
+        self.blackout = BlackoutSequence(config.blackout, self.clock)
         # Fixed resolution order of PROJECT.md 3.13: [WARDEN, DRIFTER, PROWLER, SPRINTER].
         self._door_entities: tuple[tuple[DoorEntity, Generator], ...] = tuple(
             pair
@@ -263,9 +265,12 @@ class NightSim:
         if state.power_pct <= 0.0 and not state.blackout:
             blackout.apply_onset(state)
 
-        # 4. If in blackout, advance its state machine and check for a kill.
+        # 4. If in blackout, advance its state machine and check for a kill. All entities except
+        #    WARDEN are removed from consideration, which is why this returns before step 5.
         if state.blackout:
-            state.cause = blackout.resolve(state)
+            state.cause = self.blackout.resolve(state, self.rng.blackout)
+            if state.cause is None and state.tick >= self.clock.total_ticks:
+                state.cause = TerminationCause.SURVIVED  # reaching dawn mid-sequence is a win
             return
 
         # 5. Decrement WARDEN's countdown; if it expires, execute the move. Never paused by the

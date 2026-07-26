@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
+from itertools import pairwise
 
 import pytest
 
-from nightguard.core import Action, EntityId, NightSim, Node, TerminationCause
-from tests.conftest import clear_stage, step_until
+from nightguard import derivations
+from nightguard.core import (
+    Action,
+    EntityId,
+    NightConfig,
+    NightSim,
+    Node,
+    TerminationCause,
+    Topology,
+    load_night_config,
+)
+from tests.conftest import clear_stage, step_until, with_only
 
 WARDEN_ONLY = [EntityId.WARDEN]
 PATH = (
@@ -93,6 +105,38 @@ class TestCountdown:
         start_tick = sim.state.tick
         step_until(sim, lambda s: s.state.warden.node is not Node.STAGE, max_steps=40)
         assert sim.state.tick - start_tick == pytest.approx(expected_ticks, abs=5)
+
+    def test_a_success_during_a_countdown_does_not_restart_it(
+        self, make_sim: Callable[..., NightSim]
+    ) -> None:
+        """PROJECT.md 10. At AI 20 every opportunity succeeds, so a restart would be permanent.
+
+        With a 15 s countdown in flight and opportunities every 3.02 s, an unguarded assignment
+        re-arms the countdown roughly five times before it could ever expire.
+        """
+        sim = warden_sim(make_sim, level=20)
+        units = sim.clock.to_units(15.0)
+        sim.state.warden.countdown_units = units
+        expected_tick = sim.state.tick + sim.clock.units_to_ticks(units)
+
+        moved = step_until(sim, lambda s: s.state.warden.node is not Node.STAGE, max_steps=60)
+
+        assert moved, "the countdown never expired; a repeat success restarted it"
+        assert sim.state.tick <= expected_tick + sim.clock.ticks_per_decision_step
+
+    def test_the_countdown_decrements_monotonically(
+        self, make_sim: Callable[..., NightSim]
+    ) -> None:
+        """The direct form of the same invariant: it may only ever fall."""
+        sim = warden_sim(make_sim, level=20)
+        sim.state.warden.countdown_units = sim.clock.to_units(15.0)
+        previous = sim.state.warden.countdown_units
+        for _ in range(60):
+            if sim.state.warden.countdown_units is None:
+                break
+            assert sim.state.warden.countdown_units <= previous
+            previous = sim.state.warden.countdown_units
+            sim.step(Action.NOOP)
 
     def test_a_raised_monitor_suppresses_new_rolls(self, make_sim: Callable[..., NightSim]) -> None:
         """Level 20 always succeeds, so any movement here would be a suppression failure."""
@@ -244,3 +288,86 @@ class TestOfficeKill:
         for _ in range(50):
             sim.step(Action.SELECT_CAM_3)
         assert sim.state.warden.office_kill_units == 0
+
+
+# --- PROJECT.md 8.3: stage-to-corner latency ---------------------------------------------------
+
+# The analytic curve lives in nightguard.derivations, derived in CHANGELOG from 3.4's countdown
+# table and 3.3's opportunity model.
+#
+# The per-level residual is *systematic, not statistical*: the derivation is continuous while the
+# simulation quantises both the firing schedule and the countdown upward to whole ticks. Measured
+# at n=800 it spans -2.8% to +5.5% with z-scores of 1 to 5, so it is a modelling gap of known
+# direction and bounded size, not noise. The per-level band is set from that characterisation; the
+# aggregate assertion below is the tight one, because the residual has no consistent sign and
+# largely cancels across levels.
+LATENCY_BAND = 0.08
+LATENCY_MEAN_BAND = 0.04
+LATENCY_EPISODES = 600
+NIGHT_SCALE = 4  # AI 1's walk is ~360 s of a 535 s night; a longer night removes the censoring
+MIN_REACHED = 0.95
+
+
+def latency_config(night: int, level: int, scale: int = NIGHT_SCALE) -> NightConfig:
+    """WARDEN alone, fixed level, no escalation, on a lengthened night. PROJECT.md 8.3."""
+    config = load_night_config(night)
+    config = replace(config, ai=replace(config.ai, levels=(level, 0, 0, 0), escalation=()))
+    config = with_only(config, [EntityId.WARDEN])
+    return replace(
+        config,
+        timing=replace(
+            config.timing,
+            hour_durations_s=tuple(d * scale for d in config.timing.hour_durations_s),
+        ),
+    )
+
+
+def measure_latency(level: int, episodes: int, topology: Topology) -> tuple[float, int]:
+    """Mean seconds from STAGE to E_CORNER, and how many episodes got there."""
+    config = latency_config(6, level)
+    total, reached = 0.0, 0
+    for seed in range(episodes):
+        sim = NightSim.from_seed(config, seed=seed, topology=topology)
+        clear_stage(sim)
+        while not sim.state.terminated and sim.state.warden.node is not Node.E_CORNER:
+            sim.step(Action.NOOP)
+        if sim.state.warden.node is Node.E_CORNER:
+            total += sim.clock.time_s(sim.state.tick)
+            reached += 1
+    return (total / reached if reached else float("nan")), reached
+
+
+@pytest.mark.slow
+def test_latency_agrees_with_the_derivation(topology: Topology) -> None:
+    """PROJECT.md 8.3. Monotonicity alone is weak; agreement with the curve is the real test."""
+    residuals = []
+    report = []
+    for level in range(1, 11):
+        predicted = derivations.warden_latency_s(latency_config(6, level), level)
+        measured, reached = measure_latency(level, LATENCY_EPISODES, topology)
+        assert reached >= LATENCY_EPISODES * MIN_REACHED, (
+            f"AI {level}: only {reached}/{LATENCY_EPISODES} reached the corner; mean is censored"
+        )
+        residual = (measured - predicted) / predicted
+        residuals.append(residual)
+        report.append(f"AI {level}: {measured:.2f} vs {predicted:.2f} ({residual:+.1%})")
+
+    worst = max(abs(r) for r in residuals)
+    average = sum(abs(r) for r in residuals) / len(residuals)
+    assert worst <= LATENCY_BAND, "; ".join(report)
+    assert average <= LATENCY_MEAN_BAND, "; ".join(report)
+
+
+def test_latency_is_monotonically_decreasing_in_ai_level(topology: Topology) -> None:
+    """The original 8.3 assertion, kept alongside the stronger one."""
+    means = [measure_latency(level, 60, topology)[0] for level in range(1, 11)]
+    assert all(a > b for a, b in pairwise(means)), means
+
+
+def test_the_countdown_table_matches_the_documented_ticks() -> None:
+    """8.3's quantisation table: deltas alternate 16 and 17, never a uniform 16.67."""
+    config = load_night_config(1)
+    ticks = [derivations.warden_countdown_ticks(config, level) for level in range(1, 11)]
+    assert ticks == [150, 134, 117, 100, 84, 67, 50, 34, 17, 0]
+    deltas = [a - b for a, b in pairwise(ticks)]
+    assert deltas == [16, 17, 17, 16, 17, 17, 16, 17, 17]

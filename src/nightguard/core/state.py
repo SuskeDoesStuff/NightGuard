@@ -13,8 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
+from typing import TYPE_CHECKING
 
 from .topology import Node
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle guard
+    from .blackout import BlackoutState
 
 
 class Action(IntEnum):
@@ -282,6 +286,7 @@ class SimState:
     sprinter: SprinterState
     audio: AudioState = field(default_factory=AudioState)
     step_audio: AudioState = field(default_factory=AudioState)
+    blackout_state: BlackoutState | None = None
     prev_monitor_up: bool = False
     escalations_applied: int = 0
     blackout: bool = False
@@ -342,5 +347,8 @@ class SimState:
             self.sprinter.armed_at_tick,
             self.sprinter.attack_at_tick,
             self.blackout,
+            None if self.blackout_state is None else int(self.blackout_state.phase),
+            None if self.blackout_state is None else self.blackout_state.phase_started_tick,
+            None if self.blackout_state is None else self.blackout_state.rolls_taken,
             self.cause,
         )

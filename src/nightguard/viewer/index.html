@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NightGuard trace viewer</title>
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+<!--
+  PROJECT.md 9. A static page: no server, no build step, no framework, no CDN. Drop a JSONL trace
+  next to this file and open it, or use the file picker.
+
+  This is the v0.3 subset. The belief-versus-truth overlay, the policy probability panel and the
+  V(s) sparkline all need env/, which does not exist until v1.0; traces currently carry `belief`
+  and `policy` as null and the viewer must handle that rather than error.
+-->
+<header id="bar">
+  <div class="cell"><span class="label">Night</span><span id="night">—</span></div>
+  <div class="cell"><span class="label">Clock</span><span id="clock">—</span></div>
+  <div class="cell"><span class="label">Step</span><span id="step">—</span></div>
+  <div class="cell grow">
+    <span class="label">Power</span>
+    <div class="meter"><div id="power-fill"></div></div>
+    <span id="power">—</span>
+  </div>
+  <div class="cell"><input type="file" id="file" accept=".jsonl,.json,.txt"></div>
+</header>
+
+<main>
+  <section id="map-panel">
+    <svg id="map" viewBox="0 0 680 340" role="img" aria-label="Node map"></svg>
+    <p class="legend"><span class="chip truth">(X)</span> ground truth &middot; blackout phase is
+      shown in the diagnostics panel</p>
+  </section>
+
+  <section id="panels">
+    <div class="panel">
+      <h2>Office</h2>
+      <dl id="office"></dl>
+    </div>
+    <div class="panel">
+      <h2>Entities</h2>
+      <dl id="entities"></dl>
+    </div>
+    <div class="panel">
+      <h2>Diagnostics</h2>
+      <dl id="diagnostics"></dl>
+    </div>
+  </section>
+</main>
+
+<footer id="transport">
+  <button id="play" type="button" title="Space">&#9654;</button>
+  <button id="back" type="button" title="Left arrow">&#9664;&#9664;</button>
+  <button id="fwd" type="button" title="Right arrow">&#9654;&#9654;</button>
+  <div class="scrub">
+    <input type="range" id="scrub" min="0" max="0" value="0">
+    <div id="markers"></div>
+  </div>
+  <span id="tick">—</span>
+</footer>
+
+<p id="status">Load a <code>.jsonl</code> trace to begin.</p>
+
+<script src="viewer.js"></script>
+</body>
+</html>
