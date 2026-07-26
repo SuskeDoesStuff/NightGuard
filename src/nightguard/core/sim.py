@@ -24,20 +24,25 @@ from .config import EscalationEvent, LevelSpec, NightConfig, UniformChoice
 from .entities.base import DoorEntity, opportunity_succeeds
 from .entities.drifter import Drifter
 from .entities.prowler import Prowler
+from .entities.sprinter import Sprinter
+from .entities.warden import Warden
 from .rng import SimRng
 from .state import (
     Action,
+    AudioState,
     DoorEntityState,
     DoorSide,
     EntityId,
     OfficeState,
     SimState,
+    SprinterState,
     TerminationCause,
+    WardenState,
     camera_for_action,
     is_camera_action,
     killed_by,
 )
-from .topology import Topology, load_topology
+from .topology import Node, Topology, load_topology
 
 
 @dataclass(frozen=True)
@@ -90,13 +95,22 @@ class NightSim:
         )
         self.rng = SimRng.from_generator(rng)
 
+        self.warden = Warden(config.entities.warden, self.clock, config.ai)
         self.drifter = Drifter(config.entities.drifter, self.clock, config.office)
         self.prowler = Prowler(config.entities.prowler, self.clock, config.office)
+        self.sprinter = Sprinter(config.entities.sprinter, self.clock)
         # Fixed resolution order of PROJECT.md 3.13: [WARDEN, DRIFTER, PROWLER, SPRINTER].
-        # WARDEN and SPRINTER are absent in v0.1 but keep their slots in the ordering.
-        self._entities: tuple[tuple[DoorEntity, Generator], ...] = (
-            (self.drifter, self.rng.drifter),
-            (self.prowler, self.rng.prowler),
+        self._door_entities: tuple[tuple[DoorEntity, Generator], ...] = tuple(
+            pair
+            for pair, enabled in (
+                ((self.drifter, self.rng.drifter), config.entities.drifter.enabled),
+                ((self.prowler, self.rng.prowler), config.entities.prowler.enabled),
+            )
+            if enabled
+        )
+        self._footstep_nodes = frozenset(Node[name] for name in config.audio.footstep_nodes)
+        self._blind_nodes = frozenset(
+            spec.node for spec in self.topology.nodes if not spec.has_video
         )
 
         self._escalations = self._build_escalation_schedule()
@@ -152,8 +166,11 @@ class NightSim:
             power_pct=self.config.power.start_pct,
             office=OfficeState(),
             ai_levels=[self._resolve_level(spec) for spec in levels],
+            warden=WardenState(node=self.warden.start_node),
             drifter=DoorEntityState(node=self.drifter.start_node),
             prowler=DoorEntityState(node=self.prowler.start_node),
+            sprinter=SprinterState(),
+            audio=AudioState(),
         )
 
     # --- driving -------------------------------------------------------------------------------
@@ -209,9 +226,12 @@ class NightSim:
         """One sim tick, in the fixed order of PROJECT.md 3.13."""
         state = self.state
 
+        state.audio.clear_events()
+
         # 1. Apply the agent's action (decision-step boundaries only).
         if action is not None:
             self._apply_action(action)
+        self._resolve_monitor_transition()
 
         # 2. Advance the clock; escalate if an hour boundary was crossed.
         state.tick += 1
@@ -228,27 +248,96 @@ class NightSim:
             state.cause = blackout.resolve(state)
             return
 
-        # 5. WARDEN's countdown lands in v0.2.
+        # 5. Decrement WARDEN's countdown; if it expires, execute the move. Never paused by the
+        #    monitor: only new opportunity rolls are suppressed, never an in-flight countdown.
+        self.warden.tick_countdown(state)
 
         # 6. Movement opportunities, in the fixed entity order.
-        for entity, rng in self._entities:
-            entity_state = state.entity(entity.entity_id)
-            if not entity.timer.fires_at(state.tick, entity_state.fire_count):
-                continue
-            entity_state.fire_count += 1
-            if opportunity_succeeds(rng, state.ai_levels[entity.entity_id], self.config.ai):
-                entity.resolve(state, rng)
+        self._resolve_opportunities()
 
         # 7. Resolve pending kills.
         self._resolve_pending_kills()
+        self._update_state_audio()
         if state.terminated:
             return
 
         # 8. Momentary lights expire at the end of the decision step, in step().
-        # 9. Trace emission lands in v0.2.
+        # 9. Trace emission is driven by the caller via `TraceWriter`.
 
         if state.tick >= self.clock.total_ticks:
             state.cause = TerminationCause.SURVIVED
+
+    def _resolve_monitor_transition(self) -> None:
+        """Fire SPRINTER's monitor-edge rules. PROJECT.md 3.7.
+
+        Raising the monitor triggers an armed attack; lowering it samples the immunity window.
+        Both are edges, not levels, so they are evaluated once per change.
+        """
+        state = self.state
+        current = state.office.monitor_up
+        if current != state.prev_monitor_up:
+            if current:
+                self.sprinter.on_monitor_raised(state)
+            else:
+                self.sprinter.on_monitor_lowered(state, self.rng.sprinter)
+            state.prev_monitor_up = current
+
+    def _resolve_opportunities(self) -> None:
+        """PROJECT.md 3.13 step 6, in the fixed order [WARDEN, DRIFTER, PROWLER, SPRINTER].
+
+        The roll is always drawn when the timer fires, even when the opportunity is suppressed, so
+        that stream consumption does not depend on monitor state. Suppression is applied to the
+        outcome, matching 3.4's "automatically fails every movement opportunity".
+        """
+        state = self.state
+        config = self.config.ai
+
+        warden_state = state.warden
+        if self.config.entities.warden.enabled and self.warden.timer.fires_at(
+            state.tick, warden_state.fire_count
+        ):
+            warden_state.fire_count += 1
+            success = opportunity_succeeds(
+                self.rng.warden, state.ai_levels[EntityId.WARDEN], config
+            )
+            if (
+                success
+                and not self.warden.is_suppressed(state)
+                and not self.warden.is_stage_locked(state)
+            ):
+                self.warden.resolve(state, self.rng.warden)
+
+        for entity, rng in self._door_entities:
+            entity_state = state.entity(entity.entity_id)
+            if not entity.timer.fires_at(state.tick, entity_state.fire_count):
+                continue
+            entity_state.fire_count += 1
+            before = entity_state.node
+            if opportunity_succeeds(rng, state.ai_levels[entity.entity_id], config):
+                entity.resolve(state, rng)
+            if entity_state.node != before and entity_state.node in self._footstep_nodes:
+                state.audio.footstep = True
+
+        sprinter_state = state.sprinter
+        if self.config.entities.sprinter.enabled and self.sprinter.timer.fires_at(
+            state.tick, sprinter_state.fire_count
+        ):
+            sprinter_state.fire_count += 1
+            success = opportunity_succeeds(
+                self.rng.sprinter, state.ai_levels[EntityId.SPRINTER], config
+            )
+            if success and not self.sprinter.is_frozen(state):
+                self.sprinter.resolve(state, self.rng.sprinter)
+
+    def _update_state_audio(self) -> None:
+        """Recompute the `kitchen` state signal. PROJECT.md 3.9.
+
+        Derived from the topology rather than a node constant: it fires when an entity occupies a
+        node with no video feed, so the blind node and its audio compensation cannot drift apart.
+        """
+        state = self.state
+        occupied = (state.warden.node, state.prowler.node, state.drifter.node)
+        state.audio.kitchen = any(node in self._blind_nodes for node in occupied)
 
     def _apply_action(self, action: Action) -> None:
         """Apply one action to the office. PROJECT.md 3.2."""
@@ -294,19 +383,31 @@ class NightSim:
             state.record(f"escalation_hour_{event.hour}")
 
     def _resolve_pending_kills(self) -> None:
-        """Resolve office occupancy. PROJECT.md 3.5.
+        """PROJECT.md 3.13 step 7, in the fixed entity order.
 
-        An entity that has entered the office kills the next time the monitor is down, or after the
-        invasion timeout, whichever comes first. If the monitor was already down when it entered,
-        that condition is satisfied on the same tick.
+        WARDEN kills probabilistically per second of monitor-down time and has no timeout;
+        DRIFTER and PROWLER kill the next time the monitor is down or after the invasion timeout,
+        whichever comes first; SPRINTER kills when its grace period expires against an open door.
         """
         state = self.state
+
+        if self.warden.office_kill_roll(state, self.rng.warden):
+            self._kill(EntityId.WARDEN)
+            return
+
         for entity_id in (EntityId.DRIFTER, EntityId.PROWLER):
             entity_state = state.entity(entity_id)
             if entity_state.invaded_at_tick is None:
                 continue
             elapsed = state.tick - entity_state.invaded_at_tick
             if not state.office.monitor_up or elapsed >= self._invasion_timeout_ticks:
-                state.cause = killed_by(entity_id)
-                state.record(f"death_{entity_id.name.lower()}")
+                self._kill(entity_id)
                 return
+
+        if self.sprinter.tick_attack(state, self.rng.sprinter):
+            self._kill(EntityId.SPRINTER)
+
+    def _kill(self, entity_id: EntityId) -> None:
+        """Terminate the episode with the given entity as the cause."""
+        self.state.cause = killed_by(entity_id)
+        self.state.record(f"death_{entity_id.name.lower()}")

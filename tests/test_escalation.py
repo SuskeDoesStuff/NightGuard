@@ -46,7 +46,7 @@ class TestOpportunityRoll:
 
 @pytest.mark.parametrize("night", sorted(END_OF_NIGHT_LEVELS))
 def test_end_of_night_levels(night: int, make_sim: Callable[..., NightSim]) -> None:
-    result = make_sim(night=night, seed=99).run()
+    result = make_sim(night=night, seed=99, only=()).run()
     assert result.ai_levels == END_OF_NIGHT_LEVELS[night]
 
 
@@ -54,7 +54,7 @@ def test_night_four_rolls_wardens_starting_level(make_sim: Callable[..., NightSi
     """Night 4's WARDEN starts at 1 or 2, uniformly, rolled at reset. WARDEN never escalates."""
     outcomes = set()
     for seed in range(60):
-        result = make_sim(night=4, seed=seed).run()
+        result = make_sim(night=4, seed=seed, only=()).run()
         assert result.ai_levels[1:] == (5, 6, 8)
         outcomes.add(result.ai_levels[EntityId.WARDEN])
     assert outcomes == {1, 2}
@@ -62,7 +62,7 @@ def test_night_four_rolls_wardens_starting_level(make_sim: Callable[..., NightSi
 
 def test_escalation_fires_exactly_once_per_boundary(make_sim: Callable[..., NightSim]) -> None:
     """v0.1 exit criterion 4."""
-    sim = make_sim(night=1, seed=5)
+    sim = make_sim(night=1, seed=5, only=())
     result = sim.run()
 
     assert result.escalations_applied == EXPECTED_ESCALATION_EVENTS
@@ -79,12 +79,12 @@ def test_warden_never_escalates_within_a_night(make_sim: Callable[..., NightSim]
     for night in sorted(END_OF_NIGHT_LEVELS):
         config = load_night_config(night)
         start = config.ai.levels[EntityId.WARDEN]
-        result = make_sim(night=night, seed=1).run()
+        result = make_sim(night=night, seed=1, only=()).run()
         assert result.ai_levels[EntityId.WARDEN] == start
 
 
 def test_levels_are_clamped_to_the_maximum(make_sim: Callable[..., NightSim]) -> None:
-    result = make_sim(night=1, seed=1, levels=[20, 20, 20, 20]).run()
+    result = make_sim(night=1, seed=1, levels=[20, 20, 20, 20], only=()).run()
     assert result.ai_levels == (20, 20, 20, 20)
 
 

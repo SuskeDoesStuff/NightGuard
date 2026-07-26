@@ -68,6 +68,7 @@ class WardenConfig:
     the seconds table in 3.4. It is not a frame rate and must not be treated as one elsewhere.
     """
 
+    enabled: bool = True
     interval_s: float = 3.02
     path: tuple[str, ...] = (
         "STAGE",
@@ -82,13 +83,16 @@ class WardenConfig:
     countdown_per_level: float = 100.0
     countdown_divisor: float = 60.0
     office_kill_prob_per_s: float = 0.25
+    office_kill_interval_s: float = 1.0
     stage_lock: bool = True
+    door: str = "right"
 
 
 @dataclass(frozen=True)
 class DrifterConfig:
     """DRIFTER: uniform teleport within a pool. PROJECT.md 3.5."""
 
+    enabled: bool = True
     interval_s: float = 4.97
     mode: str = "pool"
     pool: tuple[str, ...] = ("COMMONS", "W_BACKSTAGE", "W_CLOSET", "W_HALL", "W_CORNER")
@@ -102,6 +106,7 @@ class DrifterConfig:
 class ProwlerConfig:
     """PROWLER: uniform step to an adjacent node in a chain. PROJECT.md 3.6."""
 
+    enabled: bool = True
     interval_s: float = 4.98
     mode: str = "chain"
     chain: tuple[str, ...] = ("COMMONS", "E_RESTROOMS", "E_KITCHEN", "E_HALL", "E_CORNER")
@@ -115,6 +120,7 @@ class ProwlerConfig:
 class SprinterConfig:
     """SPRINTER. PROJECT.md 3.7. Not simulated in v0.1."""
 
+    enabled: bool = True
     interval_s: float = 5.01
     stages_to_arm: int = 3
     immunity_range_s: tuple[float, float] = (0.83, 16.67)
@@ -226,6 +232,19 @@ class BlackoutConfig:
 
 
 @dataclass(frozen=True)
+class AudioConfig:
+    """The audio channel. PROJECT.md 3.9.
+
+    ``footstep_nodes`` are the nodes near enough to the office for a completed move to be heard.
+    The ``kitchen`` signal is not configured here: it is derived from the topology as "an entity
+    is at a node with no video feed", so the blind node and its audio compensation cannot drift
+    apart.
+    """
+
+    footstep_nodes: tuple[str, ...] = ("W_HALL", "W_CORNER", "E_HALL", "E_CORNER")
+
+
+@dataclass(frozen=True)
 class FlagsConfig:
     """Ablation flags. PROJECT.md 3.8 and 4."""
 
@@ -257,6 +276,7 @@ class NightConfig:
     power: PowerConfig = PowerConfig()
     office: OfficeConfig = OfficeConfig()
     blackout: BlackoutConfig = BlackoutConfig()
+    audio: AudioConfig = AudioConfig()
     flags: FlagsConfig = FlagsConfig()
     reward: RewardConfig = RewardConfig()
 
@@ -375,18 +395,22 @@ def _parse_timing(data: Mapping[str, Any], base: TimingConfig) -> TimingConfig:
 
 def _parse_warden(data: Mapping[str, Any], base: WardenConfig) -> WardenConfig:
     return WardenConfig(
+        enabled=_bool(data, "enabled", base.enabled),
         interval_s=_float(data, "interval_s", base.interval_s),
         path=_str_tuple(data, "path", base.path),
         countdown_numerator=_float(data, "countdown_numerator", base.countdown_numerator),
         countdown_per_level=_float(data, "countdown_per_level", base.countdown_per_level),
         countdown_divisor=_float(data, "countdown_divisor", base.countdown_divisor),
         office_kill_prob_per_s=_float(data, "office_kill_prob_per_s", base.office_kill_prob_per_s),
+        office_kill_interval_s=_float(data, "office_kill_interval_s", base.office_kill_interval_s),
         stage_lock=_bool(data, "stage_lock", base.stage_lock),
+        door=_str(data, "door", base.door),
     )
 
 
 def _parse_drifter(data: Mapping[str, Any], base: DrifterConfig) -> DrifterConfig:
     return DrifterConfig(
+        enabled=_bool(data, "enabled", base.enabled),
         interval_s=_float(data, "interval_s", base.interval_s),
         mode=_str(data, "mode", base.mode),
         pool=_str_tuple(data, "pool", base.pool),
@@ -399,6 +423,7 @@ def _parse_drifter(data: Mapping[str, Any], base: DrifterConfig) -> DrifterConfi
 
 def _parse_prowler(data: Mapping[str, Any], base: ProwlerConfig) -> ProwlerConfig:
     return ProwlerConfig(
+        enabled=_bool(data, "enabled", base.enabled),
         interval_s=_float(data, "interval_s", base.interval_s),
         mode=_str(data, "mode", base.mode),
         chain=_str_tuple(data, "chain", base.chain),
@@ -411,6 +436,7 @@ def _parse_prowler(data: Mapping[str, Any], base: ProwlerConfig) -> ProwlerConfi
 
 def _parse_sprinter(data: Mapping[str, Any], base: SprinterConfig) -> SprinterConfig:
     return SprinterConfig(
+        enabled=_bool(data, "enabled", base.enabled),
         interval_s=_float(data, "interval_s", base.interval_s),
         stages_to_arm=_int(data, "stages_to_arm", base.stages_to_arm),
         immunity_range_s=_pair(data, "immunity_range_s", base.immunity_range_s),
@@ -540,6 +566,11 @@ def config_from_mapping(data: Mapping[str, Any], base: NightConfig | None = None
         power=_parse_power(_mapping(data, "power"), current.power),
         office=_parse_office(_mapping(data, "office"), current.office),
         blackout=_parse_blackout(_mapping(data, "blackout"), current.blackout),
+        audio=AudioConfig(
+            footstep_nodes=_str_tuple(
+                _mapping(data, "audio"), "footstep_nodes", current.audio.footstep_nodes
+            )
+        ),
         flags=_parse_flags(_mapping(data, "flags"), current.flags),
         reward=_parse_reward(_mapping(data, "reward"), current.reward),
     )

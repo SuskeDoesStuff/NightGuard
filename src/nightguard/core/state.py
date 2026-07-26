@@ -167,6 +167,86 @@ class DoorEntityState:
 
 
 @dataclass
+class WardenState:
+    """WARDEN's position, countdown and office timer. PROJECT.md 3.4.
+
+    Attributes:
+        node: Current node on the fixed path.
+        path_index: Index into the configured path; kept in step with ``node``.
+        fire_count: Movement opportunities fired so far.
+        countdown_units: Grid units remaining on an in-flight move countdown, or ``None``.
+            Held in grid units rather than ticks because six of the ten countdown values are
+            not whole ticks; raising the monitor does **not** pause it.
+        office_kill_units: Accumulated monitor-down time inside the office, in grid units.
+            The 25%/s roll fires once per whole second of it.
+    """
+
+    node: Node
+    path_index: int = 0
+    fire_count: int = 0
+    countdown_units: int | None = None
+    office_kill_units: int = 0
+
+    @property
+    def in_office(self) -> bool:
+        """Whether WARDEN has reached the office."""
+        return self.node is Node.OFFICE
+
+    @property
+    def counting_down(self) -> bool:
+        """Whether a move countdown is in flight."""
+        return self.countdown_units is not None
+
+
+@dataclass
+class SprinterState:
+    """SPRINTER's stage counter and timers. PROJECT.md 3.7.
+
+    SPRINTER has no position at all. ``immune_until_tick`` is exclusive: the immunity window
+    sampled when the monitor comes down blocks opportunities on ticks before it.
+    """
+
+    stage: int = 0
+    fire_count: int = 0
+    immune_until_tick: int = 0
+    bang_count: int = 0
+    armed_at_tick: int | None = None
+    attack_at_tick: int | None = None
+    resolve_at_tick: int | None = None
+
+    @property
+    def armed(self) -> bool:
+        """Whether the stage counter has reached the arming threshold."""
+        return self.armed_at_tick is not None
+
+    @property
+    def attacking(self) -> bool:
+        """Whether an attack has fired and is inside its grace period."""
+        return self.attack_at_tick is not None
+
+
+@dataclass
+class AudioState:
+    """The four binary audio signals of PROJECT.md 3.9.
+
+    ``kitchen`` is a *state* signal — the compensation for `E_KITCHEN` having no video feed — and
+    is recomputed every tick. The other three are *event* signals, set by the event that raises
+    them and cleared at the start of the next tick.
+    """
+
+    footstep: bool = False
+    kitchen: bool = False
+    running: bool = False
+    bang: bool = False
+
+    def clear_events(self) -> None:
+        """Clear the event signals, leaving the state signal to be recomputed."""
+        self.footstep = False
+        self.running = False
+        self.bang = False
+
+
+@dataclass
 class SimState:
     """Complete ground-truth state of one night.
 
@@ -178,8 +258,12 @@ class SimState:
     power_pct: float
     office: OfficeState
     ai_levels: list[int]
+    warden: WardenState
     drifter: DoorEntityState
     prowler: DoorEntityState
+    sprinter: SprinterState
+    audio: AudioState = field(default_factory=AudioState)
+    prev_monitor_up: bool = False
     escalations_applied: int = 0
     blackout: bool = False
     cause: TerminationCause | None = None
@@ -191,12 +275,12 @@ class SimState:
         return self.cause is not None
 
     def entity(self, entity: EntityId) -> DoorEntityState:
-        """The state of a door entity. v0.1 simulates DRIFTER and PROWLER only."""
+        """The state of a door entity. WARDEN and SPRINTER have their own state shapes."""
         if entity is EntityId.DRIFTER:
             return self.drifter
         if entity is EntityId.PROWLER:
             return self.prowler
-        raise KeyError(f"{entity.name} is not simulated in v0.1")
+        raise KeyError(f"{entity.name} does not have door-entity state")
 
     def record(self, event: str) -> None:
         """Note a named event at the current tick. Becomes the trace ``event`` field in v0.2."""
@@ -221,12 +305,23 @@ class SimState:
             office.jam_left,
             office.jam_right,
             tuple(self.ai_levels),
+            int(self.warden.node),
+            self.warden.path_index,
+            self.warden.fire_count,
+            self.warden.countdown_units,
+            self.warden.office_kill_units,
             int(self.drifter.node),
             self.drifter.fire_count,
             self.drifter.invaded_at_tick,
             int(self.prowler.node),
             self.prowler.fire_count,
             self.prowler.invaded_at_tick,
+            self.sprinter.stage,
+            self.sprinter.fire_count,
+            self.sprinter.immune_until_tick,
+            self.sprinter.bang_count,
+            self.sprinter.armed_at_tick,
+            self.sprinter.attack_at_tick,
             self.blackout,
             self.cause,
         )

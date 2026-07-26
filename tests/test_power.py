@@ -38,9 +38,13 @@ def expected_idle_drain(night: int) -> float:
 def test_idle_power_at_dawn_matches_the_exit_table(
     night: int, make_sim: Callable[..., NightSim]
 ) -> None:
-    """v0.1 exit criterion 2, to 1e-6."""
+    """v0.1 exit criterion 2, to 1e-6.
+
+    Every entity is disabled: this measures the power model, and from v0.2 SPRINTER kills a
+    do_nothing policy on most seeds, which would otherwise end the night before dawn.
+    """
     config = load_night_config(night)
-    result = make_sim(night=night, seed=4242).run()
+    result = make_sim(night=night, seed=4242, only=()).run()
 
     assert result.cause is TerminationCause.SURVIVED
     drained = config.power.start_pct - result.final_power_pct
@@ -68,7 +72,7 @@ def test_two_doors_all_night_blacks_out_inside_the_5am_block(
     The doors are set closed at t = 0 rather than toggled, because only one action fits in a decision
     step and "held closed for the entire night" means from the start.
     """
-    sim = make_sim(night=1, seed=7)
+    sim = make_sim(night=1, seed=7, only=())
     sim.state.office.door_left = True
     sim.state.office.door_right = True
 
@@ -82,7 +86,7 @@ def test_two_doors_all_night_blacks_out_inside_the_5am_block(
 
 def test_toggling_both_doors_costs_two_steps_of_ramp_up(make_sim: Callable[..., NightSim]) -> None:
     """Driving the same scenario from an action script is three ticks slower, and that is real."""
-    sim = make_sim(night=1, seed=7)
+    sim = make_sim(night=1, seed=7, only=())
     result = sim.run([Action.TOGGLE_DOOR_LEFT, Action.TOGGLE_DOOR_RIGHT])
 
     assert result.cause is TerminationCause.KILLED_BLACKOUT
