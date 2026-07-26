@@ -26,6 +26,7 @@ from tests.conftest import step_until, with_only
 
 # PROJECT.md 8.2's night-1 figure, derived in CHANGELOG from 3.1, 3.3 and 3.7 before SPRINTER was
 # written. Do not adjust this to match a measurement; if they disagree, that is the finding.
+# No longer provisional: SPRINTER exists from v0.2, so this assertion can fail in both directions.
 DERIVED_NIGHT_1_SURVIVAL = 0.2397
 
 EPISODES = 250
@@ -53,6 +54,7 @@ def binomial_sigma(p: float, n: int) -> float:
     return (p * (1.0 - p) / n) ** 0.5
 
 
+@pytest.mark.slow
 class TestDoNothing:
     """8.2's night-1 agreement test, which can fail in both directions."""
 
@@ -81,6 +83,7 @@ class TestDoNothing:
         assert causes <= {TerminationCause.SURVIVED, TerminationCause.KILLED_SPRINTER}, causes
 
 
+@pytest.mark.slow
 class TestRhythm:
     """8.2: rhythm must beat do_nothing on nights 3 through 6."""
 
@@ -96,6 +99,7 @@ class TestRhythm:
             assert rate >= 0.9, f"night {night}: {rate:.3f}"
 
 
+@pytest.mark.slow
 class TestMonitorDownProbe:
     """v0.2 exit criterion 7. A reported finding, not a pass/fail gate."""
 

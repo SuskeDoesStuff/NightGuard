@@ -31,7 +31,7 @@ All four must pass before any milestone is called done. See PROJECT.md §11.
 |---|---|---|
 | v0.1 | Clock, power, office controls, DRIFTER + PROWLER | **Done** — tag `v0.1`, commit `19362e1` |
 | v0.2 | WARDEN + SPRINTER, trace format, audio, reference policies | **Done** — tag `v0.2` |
-| v0.3 | Three-phase blackout, full validation suite (§8) | **Current** |
+| v0.3 | Three-phase blackout, validation suite (§8), minimal viewer | **Current** |
 | v1.0 | Gymnasium wrapper, wrappers, vectorised runner | Not started |
 | v1.1 | RecurrentPPO baseline | Not started |
 | v1.2 | Replay viewer | Not started |
@@ -48,6 +48,8 @@ milestone: everything after it depends on the simulator being correct.
 - Never weaken a tolerance, threshold, or assertion to make a test pass. If you believe an exit
   criterion is wrong, stop and say so.
 - Every statistical assertion needs a non-vacuity check (PROJECT.md §8.0).
+- Derive every statistical target analytically and write it to `CHANGELOG.md` **before** measuring.
+  If measurement disagrees with derivation, stop and report. Do not adjust either.
 
 ## Settled decisions — do not re-litigate
 
@@ -88,3 +90,13 @@ PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning.
   that only observes at decision boundaries. Both passed every targeted test.
 - **Tests that measure the power or AI subsystems must disable the roster** (`entities.*.enabled`).
   Otherwise SPRINTER ends the night before dawn and the measurement silently changes meaning.
+- **§8's assertions encode the spec, never the implementation.** Every derived constant carries a
+  comment naming its spec sections and a pointer to the `CHANGELOG.md` derivation. A bare float in
+  an assertion is indistinguishable from a value copied out of a test run.
+- **A countdown in flight is not restarted by a further success** (§3.4, §10). Reverting this
+  silently distorts §8.3's latency curve.
+- **Blackout phases roll first at t=5 s, not t=0, and a roll landing exactly on the budget
+  boundary counts** (§3.11, §10). The other roll offset moves §8.7 from 0.6148 to 0.4389; the other
+  boundary convention moves it to 0.6367, which is 4.5σ at n=10,000 and looks like a blackout bug.
+- **Survival tests are behind the `slow` marker.** `pytest` alone does not run them; use
+  `scripts/validate.py` before claiming a milestone.

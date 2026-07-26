@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.3 — Fidelity lock
+
+### v0.2 follow-ups
+
+- **§3.13 gained step 2b.** The code resolves monitor edges between steps 2 and 3, and had done
+  since v0.2, but §3.13 still listed the original nine steps under a header reading "Fix this order
+  and never change it." A fresh session reconciling code against spec could have restored the
+  documented order, silently made §3.7's 0.5 s window unreachable again, and no test named for
+  §3.13 would have caught it. Spec now matches code.
+- **§8.2's provisional marker cleared.** SPRINTER exists; the assertion is live.
+- **§8.3 records the countdown's ceiling quantisation.** Countdowns are exact on the 1/300 s grid,
+  but a tick is 30 units and `units_to_ticks` ceilings, so AI 2's 13.333 s countdown expires at
+  13.4 s and per-level deltas alternate 16/17 ticks rather than a uniform 16.67.
+- **§8.4 and §8.7 rewritten** — see the derivations below.
+- **Survival measurements moved behind a `slow` marker**, deselected by default. `pytest` is 6.4 s
+  where it was 66 s; `scripts/validate.py` still runs everything.
+- **`test_different_seeds_diverge` strengthened** from `len(outcomes) > 1` on tick counts to ten
+  distinct full state signatures over forty seeds, matching `test_trace.py`'s threshold. A check
+  satisfied by two outcomes in thirty is nearly as vacuous as what §8.0 exists to prevent.
+
+### Reference policy series, post-tuning (A6)
+
+400 seeds per night, `rhythm` frozen at `peek_every_steps=12`:
+
+| Night | `rhythm` | `monitor_down` |
+|---|---|---|
+| 1 | 1.000 | 1.000 |
+| 2 | 1.000 | 0.980 |
+| 3 | 0.998 | 0.715 |
+| 4 | 0.917 | 0.000 |
+
+**The curriculum start stays at night 3.** The concern that prompted this measurement — that the
+monitor-down probe beat `rhythm` at the locked start, so an agent would learn "never raise the
+monitor" first — used the pre-tuning figure of 0.370. Post-tuning `rhythm` wins at every night, so
+no §10 row moving the start is warranted on those grounds.
+
+**A second finding, which is the better argument.** `rhythm` scores 0.998 on night 3, leaving
+essentially no headroom for a learned policy to improve against. A curriculum stage where the
+reference strategy already survives 99.8% of episodes gives a very weak gradient regardless of what
+the probe does. If v1.1 moves the curriculum start, this — not the probe ordering — should be the
+reason, and the reasoning should be inherited rather than the number.
+
 ## v0.2 — Full roster
 
 ### v0.1 follow-ups

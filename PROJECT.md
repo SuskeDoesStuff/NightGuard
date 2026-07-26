@@ -678,6 +678,11 @@ failures.
 
 1. Apply the agent's action (only on decision-step boundaries).
 2. Advance clock; if an hour boundary was crossed, apply AI escalation.
+2b. **Resolve monitor edges.** If `monitor_up` changed this tick, fire the raise or lower
+   callback. This runs *after* the clock advance so that timers it starts are stamped with the
+   tick they occur on. Stamped with the previous tick, SPRINTER's grace period expires exactly
+   on the next decision boundary, leaving no step in which to close the door and making §3.7's
+   0.5 s reaction window unreachable on the monitor-raise path.
 3. Drain power. If power ≤ 0 and not already in blackout, enter blackout.
 4. If in blackout, advance the blackout state machine and check for kill. Return.
 5. Decrement WARDEN's countdown; if it expires, execute the move.
@@ -1139,24 +1144,54 @@ of 3, so survival is indistinguishable from zero and the original strict monoton
 do not adjust the night-1 figure after measuring — if the measurement disagrees with the
 derivation, one of them is wrong and that is the finding.
 
-**Provisional until v0.2.** Before `SPRINTER` exists, `do_nothing` on night 1 is structurally
-unkillable and survival is exactly 1.000 — a proof, not a measurement (§8.0).
-
 ### 8.3 WARDEN stage-to-office latency
 
 For AI levels 1 through 10, with all other entities disabled and the stage lock bypassed,
-measure mean time from leaving `STAGE` to arriving at `E_CORNER` over 1000 episodes. Assert
-it is monotonically decreasing in AI level and that the per-level deltas track the countdown
-table in 3.4.
+measure mean time from leaving `STAGE` to arriving at `E_CORNER`. Assert it is monotonically
+decreasing in AI level, and that it agrees with the analytic prediction in `CHANGELOG.md`.
+Monotonicity alone is weak; agreement with the derived curve is the real test.
+
+**The countdown is quantised upward.** Countdowns are exact on the 1/300 s grid, but a tick is
+30 units and `units_to_ticks` is ceiling division, so AI 2's 13.333 s countdown expires at
+13.4 s. Per-level countdown deltas are therefore an alternating 16 and 17 ticks, never a uniform
+16.67. That is correct and unavoidable; it is recorded here so it does not read as a bug.
+
+| AI | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ticks | 150 | 134 | 117 | 100 | 84 | 67 | 50 | 34 | 17 | 0 |
+| delta | — | 16 | 17 | 17 | 16 | 17 | 17 | 16 | 17 | 17 |
+
+**Measure on an extended night.** At AI 1 the predicted walk is ~335 s of a 535 s night and a
+material fraction of episodes do not reach `E_CORNER` before dawn, so the sample mean is censored
+and biased downward for reasons unrelated to fidelity. Lengthen `timing.hour_durations_s` for this
+measurement so every level completes. §8.3 is already a synthetic configuration — entities
+disabled, stage lock bypassed — and an uncensored mean is what the derivation predicts.
 
 ### 8.4 SPRINTER attack frequency versus camera duty
 
-Run a family of scripted policies that raise the monitor for 0.5 s every `k` seconds, for
-`k` in `{2, 4, 6, 8, 10, 15, 20, ∞}`. Measure SPRINTER attacks per night.
+Run a family of scripted policies that raise the monitor for 0.5 s every `k` seconds and
+measure SPRINTER attacks per night. Two assertions:
 
-Assert: monotonically **increasing** in `k`, and approximately flat for `k` below the lower
-bound of the immunity window. That flattening is the signature that the immunity mechanic is
-implemented correctly.
+- **A hard zero.** For `k ≤ 1.4 s` SPRINTER records zero attacks on every seed, because the
+  unfrozen window cannot open at all. This is deterministic rather than statistical and is the
+  sharpest available test of the immunity mechanic: a single attack means either the freeze or
+  the immunity window is wrong.
+- **Agreement with the derived curve.** Measured attacks per night track the unfrozen fraction
+  derived in `CHANGELOG.md`, not merely increase monotonically.
+
+Two constraints on the family, both of which the original wording got wrong:
+
+- **`k` must be a whole number of decision steps.** Actions resolve once per 0.5 s step (§3.2),
+  so `k ∈ {0.75, 1.25}` cannot be expressed by any policy. The family is
+  `{0.5, 1.0}` for the hard zero and `{1.5, 2, 4, 6, 8, 10, 15, 20, ∞}` for the curve.
+- **The bound is 1.4 s, not 1.33 s.** The continuous bound is `0.5 + 0.83 = 1.33 s`, but the
+  immunity window is sampled in grid units and `units_to_ticks` ceilings 249 units to 9 ticks, so
+  the realised minimum is 0.9 s and the hard-zero region is `k ≤ 0.5 + 0.9 = 1.4 s`.
+
+The original assertion — "approximately flat for `k` below the lower bound of the immunity
+window" — was untestable with its own family: the flat region is `k ≤ 1.4 s` and
+`{2, 4, 6, 8, 10, 15, 20, ∞}` has no point below it. Between `k = 2` and `k = 4` the unfrozen
+fraction rises by a factor of eight, which is the opposite of flat.
 
 ### 8.5 Determinism
 
@@ -1169,9 +1204,22 @@ Assert end-of-night levels for all six nights, including night 6's `4/13/14/18`.
 
 ### 8.7 Blackout survivability
 
-With power forced to 0 at `t = 500 s`, assert the survival rate to 6AM is strictly between
-0 and 1 over 10,000 seeded runs. If it is 0, the three-phase sequence is resolving too fast
-and the mechanic has been flattened.
+With power forced to 0 at `t = 500 s`, leaving a 35 s blackout budget, assert the measured
+survival rate to 6AM agrees with the analytic value derived in `CHANGELOG.md` within binomial
+sampling error over 10,000 seeded runs.
+
+The original wording — "strictly between 0 and 1" — is nearly vacuous: it passes for anything
+except a completely broken sequence. The derived value is sharp, and the assertion is sensitive
+in both directions:
+
+| Blackout budget | P(survive) |
+|---|---|
+| 20 s | 0.9501 |
+| 25 s | 0.8977 |
+| 30 s | 0.7736 |
+| **35 s** | **0.6148** |
+| 40 s | 0.4707 |
+| 45 s | 0.2833 |
 
 ---
 

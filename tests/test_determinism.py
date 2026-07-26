@@ -15,6 +15,8 @@ from nightguard.core import Action, NightConfig, NightSim, Topology, load_night_
 
 EPISODES = 100
 SCRIPT_LENGTH = 400
+SEEDS = 40
+MIN_DISTINCT_OUTCOMES = 10
 
 
 def random_script(seed: int, length: int = SCRIPT_LENGTH) -> list[Action]:
@@ -66,14 +68,28 @@ def test_an_injected_generator_is_equivalent_to_a_seed(topology: Topology) -> No
 
 
 def test_different_seeds_diverge(topology: Topology) -> None:
-    """If every seed produced the same night, the determinism test above would be vacuous."""
+    """PROJECT.md 8.0's non-vacuity check for the reproducibility test above.
+
+    Keyed on the full ground-truth signature rather than the tick count alone, and held to a
+    threshold comparable to `test_trace.py`'s: a test satisfied by two distinct outcomes in thirty
+    is nearly as vacuous as the thing 8.0 exists to prevent.
+    """
     config = load_night_config(6)
     script = random_script(9)
     outcomes = {
         NightSim.from_seed(config, seed=seed, topology=topology).run(script).ticks
-        for seed in range(30)
+        for seed in range(SEEDS)
     }
-    assert len(outcomes) > 1
+    signatures = set()
+    for seed in range(SEEDS):
+        sim = NightSim.from_seed(config, seed=seed, topology=topology)
+        sim.run(script)
+        signatures.add(sim.state.signature())
+
+    assert len(signatures) >= MIN_DISTINCT_OUTCOMES, (
+        f"only {len(signatures)} distinct final states over {SEEDS} seeds"
+    )
+    assert len(outcomes) > 1, f"only {len(outcomes)} distinct end ticks"
 
 
 def test_padding_is_deterministic_and_terminates(topology: Topology) -> None:

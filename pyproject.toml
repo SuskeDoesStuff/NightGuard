@@ -34,6 +34,14 @@ packages = ["src/nightguard"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Survival measurements run thousands of full nights and dominate the wall clock. They are
+# deselected by default so the feedback loop stays usable; `scripts/validate.py` runs everything
+# and is what the exit criteria are checked against. Use `pytest -m slow` to run them alone, or
+# `pytest -m ""` for the whole suite.
+addopts = "-m 'not slow'"
+markers = [
+    "slow: multi-thousand-episode statistical measurements (PROJECT.md 8.2, 8.3, 8.4, 8.7)",
+]
 
 [tool.ruff]
 line-length = 100
