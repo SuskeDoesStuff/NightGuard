@@ -1,0 +1,79 @@
+# The "was the baseline under-configured?" arm. PROJECT.md 7 (v1.1).
+#
+# Two arms have now failed the same way. The baseline and `tuned` both oscillate between two
+# attractors -- "hold the monitor up" (~270 mean steps, duty ~1.0) and `monitor_down` (~820 steps,
+# duty ~0.0) -- with survival 0.000 at every evaluation, and the baseline collapsed to 168.6 mean
+# steps at 1.9M, below `do_nothing`. `tuned` changed gae_lambda, ent_coef and the learning rate
+# together and damped none of it.
+#
+# Before concluding anything about the environment, this arm tests whether the fault was in the
+# configuration. Three orthodox things the baseline did not have, none of them tuning against a
+# result:
+#
+#   normalize_reward   6.3 mixes a +-10 terminal with a 0.01 per-step term, so the value target
+#                      spans three orders of magnitude and the critic fits all of it unscaled.
+#                      VecNormalize on returns is close to standard practice for PPO and its
+#                      absence was an omission. Observations are NOT normalised: 6.2 already puts
+#                      them in [0, 1], and the evaluation env is unwrapped, so normalising them in
+#                      training would silently mismatch at evaluation time.
+#   target_kl          The baseline ran n_epochs=10 over two minibatches with no KL guard at all.
+#                      A policy that destroys its own progress inside 100,000 steps is exactly what
+#                      this exists to stop.
+#   anneal_lr          Constant step size for 2M steps. Decaying to zero across the stage is the
+#                      usual companion to a KL guard.
+#
+# gae_lambda stays at the baseline's 0.95 rather than `tuned`'s 0.995, so this arm differs from the
+# baseline in three named respects and from `tuned` in all of them. Same seed as every other arm.
+
+algorithm: recurrent_ppo
+seed: 918442
+oracle: false
+sparse: false
+
+policy:
+  lstm_hidden_size: 128
+  n_lstm_layers: 1
+  net_arch: [128, 128]
+  shared_lstm: false
+  enable_critic_lstm: true
+
+algo:
+  n_envs: 16
+  n_steps: 256
+  batch_size: 2048
+  n_epochs: 10
+  learning_rate: 0.0003
+  gamma: 0.999
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: 0.02
+  normalize_observations: false
+  normalize_reward: true
+  anneal_learning_rate: true
+  device: auto
+
+eval:
+  episodes: 500
+  every_steps: 100000
+  curve_episodes: 50
+  seed_offset: 1000000
+
+stages:
+  - name: stage1-night5
+    night: 5
+    total_steps: 2000000
+    graduation: 0.90
+    reference: 0.973
+  - name: stage2-night6
+    night: 6
+    total_steps: 2000000
+    graduation: 0.40
+    reference: 0.325
+  - name: stage3-custom-max
+    preset: custom_max
+    total_steps: 1000000
+    graduation: null
+    reference: 0.185

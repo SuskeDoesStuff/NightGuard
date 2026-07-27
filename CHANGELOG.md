@@ -66,6 +66,38 @@ But it is still the strategy that gradient ascent on §6.3 finds first, and the 
 and at 1.9M it collapsed to **168.6** — below `do_nothing`'s 172.2 — before recovering to 779 by 2M.
 Updates large enough to destroy their own progress.
 
+### Criterion 5 is not answerable at floor performance
+
+The matched pair, night 5, 2,000,000 steps, same seed, same architecture, same budget, differing
+only in the `Oracle` wrapper:
+
+| Arm | Survival | `mean_steps` | Duty | Causes |
+|---|---|---|---|---|
+| base | 0.0060 (3/500) | 824.9 | 0.162 | 438 blackout, 40 SPRINTER, 18 PROWLER |
+| **oracle** | **0.0020 (1/500)** | **773.6** | 0.042 | 363 blackout, **125 PROWLER**, 11 WARDEN |
+| gap | **−0.0040 ± 0.0040** | −51.3 | | |
+
+The gap is **negative and 1.00σ from zero** — three survivors against one, a difference of two
+episodes. §7's criterion 5 says a zero gap means stop, because either the observation is leaking or
+the task does not require memory. **Neither is the explanation, and the criterion's phrasing must not
+be allowed to force one.**
+
+It is not a leak. v1.0's probe covered 33 hidden-state mutations, and `validate.py`'s four no-leak
+checks plus the non-vacuity converse still pass on this commit. It is not "memory is unnecessary"
+either. **Both arms are pinned at the floor**, and when neither has learned the task the comparison
+measures optimisation noise rather than information. This is the floor effect the planning round
+predicted when choosing which config to run the pair on, and it is why the check also reports
+`mean_steps`; that went the wrong way too, so the fallback does not rescue it.
+
+The arms are nonetheless *not the same policy*. Ground truth changed the behaviour substantially —
+125 PROWLER deaths against 18, at a quarter the duty cycle — it just did not change survival,
+because both die to power.
+
+**The finding is that criterion 5 presupposes a base arm that has learned something.** A meaningful
+Oracle gap can only be measured against a policy that is off the floor. Recorded rather than
+answered, and the "stop" condition is deliberately not triggered: stopping would assert a leak that
+four independent checks say is not there.
+
 ### Expectation 2 was wrong: `sparse_mode` is not gradient-free
 
 Reported rather than corrected, per the rule. The expectation above — and the prompt's — was that

@@ -13,6 +13,7 @@ hyperparameter search; the prompt's working discipline is one configuration unti
 from __future__ import annotations
 
 import csv
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecNormalize
 
 from ..core.config import NightConfig, load_night_config, load_preset
 from ..core.topology import Topology, load_topology
@@ -69,9 +70,17 @@ def make_vec_env(
     Whether that holds is measured rather than assumed -- see ``scripts/profile_training.py``.
     """
     shared = topology if topology is not None else load_topology(config.topology_path())
-    return DummyVecEnv(
+    venv: VecEnv = DummyVecEnv(
         [(lambda: make_env(config, train.oracle, shared)) for _ in range(train.algo.n_envs)]
     )
+    if train.algo.normalize_observations or train.algo.normalize_reward:
+        venv = VecNormalize(
+            venv,
+            norm_obs=train.algo.normalize_observations,
+            norm_reward=train.algo.normalize_reward,
+            gamma=train.algo.gamma,
+        )
+    return venv
 
 
 def build_model(
@@ -84,8 +93,18 @@ def build_model(
         raise ValueError(f"unknown algorithm {train.algorithm!r}; expected one of {ALGORITHMS}")
     algo: AlgoConfig = train.algo
     policy: PolicyConfig = train.policy
+    # A linear decay to zero across the stage. SB3 passes remaining progress in [1, 0].
+    rate: float | Callable[[float], float] = algo.learning_rate
+    if algo.anneal_learning_rate:
+        base_rate = algo.learning_rate
+
+        def rate(progress: float) -> float:
+            """SB3 passes remaining progress in ``[1, 0]``."""
+            return base_rate * progress
+
     common: dict[str, Any] = {
-        "learning_rate": algo.learning_rate,
+        "target_kl": algo.target_kl,
+        "learning_rate": rate,
         "n_steps": algo.n_steps,
         "batch_size": algo.batch_size,
         "n_epochs": algo.n_epochs,

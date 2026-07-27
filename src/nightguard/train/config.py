@@ -65,6 +65,18 @@ class AlgoConfig:
             reward for exploring the camera system arrives many steps later.
         vf_coef: Value-loss weight.
         max_grad_norm: Gradient clipping.
+        target_kl: Stop an update early once the policy has moved this far in KL, or ``None`` to
+            let all ``n_epochs`` run. The v1.1 baseline ran without one and its evaluation curve
+            collapsed from 830.9 mean steps to 168.6 and back inside 100,000 steps, which is what
+            an unguarded update at ``n_epochs=10`` over two minibatches looks like.
+        normalize_observations: Wrap the vector env in ``VecNormalize`` for observations. The
+            observation is already in ``[0, 1]`` by construction (6.2), so this is usually
+            unnecessary and is off by default.
+        normalize_reward: Wrap the vector env in ``VecNormalize`` for returns. Worth having:
+            6.3 mixes a ``+-10`` terminal with a ``0.01`` per-step term, so the value target spans
+            three orders of magnitude and the critic has to fit all of it unscaled.
+        anneal_learning_rate: Decay the step size linearly to zero across the stage, rather than
+            holding it constant.
         device: ``auto``, ``cpu`` or ``cuda``. Recorded in the manifest either way.
     """
 
@@ -79,6 +91,10 @@ class AlgoConfig:
     ent_coef: float = 0.01
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
+    target_kl: float | None = None
+    normalize_observations: bool = False
+    normalize_reward: bool = False
+    anneal_learning_rate: bool = False
     device: str = "auto"
 
 
