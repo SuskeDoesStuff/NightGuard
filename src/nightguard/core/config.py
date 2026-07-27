@@ -609,12 +609,27 @@ def load_config(path: Path, base: NightConfig | None = None) -> NightConfig:
     return config_from_mapping(raw, base)
 
 
+def load_preset(name: str, root: Path | None = None) -> NightConfig:
+    """Load ``configs/nights/<name>.yaml`` by name.
+
+    The by-name path exists because the v1.1 curriculum's third stage is a custom night rather than
+    one of the six presets, and every config-driven workflow needs a string handle for it.
+    ``name`` is a bare stem, not a path: it must not traverse directories.
+    """
+    if not name or not name.replace("_", "").isalnum():
+        raise ConfigError(f"preset name must be alphanumeric with underscores, found {name!r}")
+    base = REPO_ROOT if root is None else root
+    path = base / "configs" / "nights" / f"{name}.yaml"
+    if not path.is_file():
+        raise ConfigError(f"no such preset: {path}")
+    return load_config(path)
+
+
 def load_night_config(night: int, root: Path | None = None) -> NightConfig:
     """Load the preset for ``night`` (1-6). PROJECT.md 3.3 and 3.10."""
     if not NIGHT_MIN <= night <= NIGHT_MAX:
         raise ConfigError(f"night must be in [{NIGHT_MIN}, {NIGHT_MAX}], found {night}")
-    base = REPO_ROOT if root is None else root
-    return load_config(base / "configs" / "nights" / f"night{night}.yaml")
+    return load_preset(f"night{night}", root)
 
 
 def with_levels(config: NightConfig, levels: Sequence[LevelSpec]) -> NightConfig:

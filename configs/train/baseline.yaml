@@ -1,0 +1,78 @@
+# The v1.1 baseline. PROJECT.md 7 (v1.1), 10.
+#
+# One configuration, unswept. The prompt's working discipline is explicit about this: get a curve
+# going up before touching a hyperparameter, because the most common failure here is sweeping before
+# the pipeline is known to work. Every key below is optional and deep-merges onto the dataclass
+# defaults in src/nightguard/train/config.py.
+
+algorithm: recurrent_ppo
+seed: 918442
+oracle: false
+sparse: false
+
+policy:
+  # Frame stacking cannot cover a 15 s WARDEN countdown (30 frames at a 0.5 s decision step), so the
+  # belief lives in recurrence. PROJECT.md 6.4, 7.
+  lstm_hidden_size: 128
+  n_lstm_layers: 1
+  net_arch: [128, 128]
+  shared_lstm: false
+  enable_critic_lstm: true
+
+algo:
+  # n_envs, n_steps and batch_size were chosen by a throughput measurement taken *before* any
+  # training run, not by a sweep against results. The update dominates the wall clock by 40:1 over
+  # rollout collection -- the environment is 0.7% of it -- and SB3's RecurrentPPO pays a fixed
+  # per-minibatch cost to pad and unroll sequences, so minibatch *count* is what sets the cost.
+  # Measured on this machine: 8x256 at batch 256 (8 minibatches) runs 191 steps/s; 16x256 at
+  # batch 2048 (2 minibatches) runs 750. Two minibatches per epoch keeps the update stochastic
+  # while putting a 2M-step stage at 44 minutes instead of 2.9 hours. See CHANGELOG, v1.1.
+  n_envs: 16
+  n_steps: 256
+  batch_size: 2048
+  n_epochs: 10
+  learning_rate: 0.0003
+  # A night is 1070 decision steps and reaching dawn pays +10 on the last one. At 0.99 that arrives
+  # at the first step worth 3e-5; at 0.999 it is still worth 3.4. Chosen against the episode length.
+  gamma: 0.999
+  gae_lambda: 0.95
+  clip_range: 0.2
+  # The action space is 17-way discrete and the payoff for learning the camera system arrives many
+  # steps later, so the entropy bonus is doing real work rather than following a default.
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  device: auto
+
+eval:
+  # 500 is what PROJECT.md 7's v1.1 criteria 3 and 4 specify.
+  episodes: 500
+  # A periodic evaluation costs `curve_episodes` full nights at ~2,200 policy calls per second, so
+  # a surviving policy makes each one ~25 s. Twenty points is enough to read a trend; a hundred
+  # would spend a third of the run measuring it.
+  every_steps: 100000
+  curve_episodes: 50
+  # Held away from any seed training could reach, so a policy is never scored on a night it trained
+  # on. Training resets draw spawned substreams, not integer seeds, but keeping the ranges disjoint
+  # makes the claim checkable rather than merely true.
+  seed_offset: 1000000
+
+# The three stages replace PROJECT.md 10's "curriculum start: night 3". `reference` is `rhythm`'s
+# measured survival at 400 seeds; see CHANGELOG, v1.1. Nights 1-4 are sanity checks, not stages:
+# `rhythm` scores 1.000/1.000/1.000/0.993 there, so graduating teaches nothing a script cannot do.
+stages:
+  - name: stage1-night5
+    night: 5
+    total_steps: 2000000
+    graduation: 0.90
+    reference: 0.973
+  - name: stage2-night6
+    night: 6
+    total_steps: 2000000
+    graduation: 0.40
+    reference: 0.325
+  - name: stage3-custom-max
+    preset: custom_max
+    total_steps: 1000000
+    graduation: null
+    reference: 0.185

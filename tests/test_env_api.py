@@ -8,7 +8,14 @@ import numpy as np
 import pytest
 from gymnasium.utils.env_checker import check_env
 
-from nightguard.core import Action, EntityId, Node, TerminationCause, load_night_config
+from nightguard.core import (
+    Action,
+    EntityId,
+    NightSim,
+    Node,
+    TerminationCause,
+    load_night_config,
+)
 from nightguard.env import NightGuardEnv
 from nightguard.env import obs as obs_mod
 from nightguard.env.wrappers import AudioMask, FrameStack, Oracle, PreviousAction
@@ -203,6 +210,50 @@ def test_reset_with_the_same_seed_reproduces_the_trajectory() -> None:
         return out
 
     assert run() == run()
+
+
+def _outcome(env: NightGuardEnv) -> tuple[int, str, float]:
+    return (env.sim.state.tick, env.sim.state.cause.value, round(env.sim.state.power_pct, 6))
+
+
+def _play_out(env: NightGuardEnv) -> tuple[int, str, float]:
+    while not env.sim.state.terminated:
+        env.step(int(Action.NOOP))
+    return _outcome(env)
+
+
+def test_unseeded_resets_do_not_replay_the_seeded_episode() -> None:
+    """Consecutive resets must draw fresh substreams.
+
+    ``reset`` used to build its own ``default_rng(seed)`` on the seeded path while falling back to
+    ``self.np_random`` on the unseeded one. Gymnasium seeds ``self.np_random`` from
+    ``SeedSequence(seed)``, which is bit-identical, so the *first* unseeded reset spawned children
+    0..5 for a second time and replayed the seeded episode exactly. SB3 seeds once and then resets
+    without a seed for the rest of the run, so every training run duplicated its first episode.
+    """
+    env = NightGuardEnv(night=6)
+    env.reset(seed=7)
+    outcomes = [_play_out(env)]
+    for _ in range(4):
+        env.reset()
+        outcomes.append(_play_out(env))
+    assert len(set(outcomes)) > 1, f"every episode identical: {outcomes[0]}"
+    assert outcomes[0] != outcomes[1], "the first unseeded reset replayed the seeded episode"
+
+
+def test_seeded_reset_still_agrees_with_the_core_simulator() -> None:
+    """The fix must not move any seeded fixture: reset(seed=k) == NightSim.from_seed(k)."""
+    config = load_night_config(6)
+    for seed in (0, 7, 918442):
+        env = NightGuardEnv(config=config)
+        env.reset(seed=seed)
+        sim = NightSim.from_seed(config, seed=seed)
+        sim.run([Action.NOOP])
+        assert _play_out(env) == (
+            sim.state.tick,
+            sim.state.cause.value,
+            round(sim.state.power_pct, 6),
+        )
 
 
 @pytest.mark.parametrize("night", NIGHTS)

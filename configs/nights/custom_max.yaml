@@ -1,0 +1,13 @@
+# Custom night, every entity at the maximum level. PROJECT.md 3.3, 3.10, 7 (v1.1 stage 3).
+#
+# Curriculum stage 3. Not one of the six shipped nights: a hand-built preset that pins all four
+# entities at `ai.level_max`, with night 6's power economy. The escalation events in 3.3 still fire
+# but are no-ops here, because sim.py clamps every level to [level_min, level_max].
+#
+# `rhythm` scores 0.185 here and dies to a blackout in every one of those losses -- it never dies to
+# an entity at all. That figure is a power-economy measurement, not a difficulty one, so do NOT
+# calibrate this night against it. See CHANGELOG, v1.1.
+ai:
+  levels: [20, 20, 20, 20]
+power:
+  night_divisor: 3.0

@@ -17,7 +17,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium.spaces import Box, Discrete
 
-from ..core.config import NightConfig, load_night_config
+from ..core.config import NightConfig, load_night_config, load_preset
 from ..core.sim import NightSim
 from ..core.state import Action, EntityId, TerminationCause
 from ..core.topology import Topology, load_topology
@@ -28,12 +28,25 @@ from .reward import RewardTracker
 DEFAULT_NIGHT = 4
 
 
+def _resolve_config(
+    night: int, preset: str | None, config: NightConfig | None, root: Path | None
+) -> NightConfig:
+    """Pick a config from the three mutually exclusive ways of naming one."""
+    if config is not None:
+        return config
+    if preset is not None:
+        return load_preset(preset, root)
+    return load_night_config(night, root)
+
+
 class NightGuardEnv(gym.Env[np.ndarray, np.int64]):
     """A single night, as a Gymnasium environment. PROJECT.md 6.
 
     Args:
         night: Which night preset to load, 1-6.
-        config: A prebuilt config, overriding ``night``.
+        preset: A preset name under ``configs/nights/``, overriding ``night``. This is how the
+            v1.1 curriculum reaches its custom third stage.
+        config: A prebuilt config, overriding both ``night`` and ``preset``.
         topology: A preloaded topology, to avoid re-reading the file per environment.
         root: Repository root, for resolving the topology path.
     """
@@ -43,12 +56,14 @@ class NightGuardEnv(gym.Env[np.ndarray, np.int64]):
     def __init__(
         self,
         night: int = DEFAULT_NIGHT,
+        preset: str | None = None,
         config: NightConfig | None = None,
         topology: Topology | None = None,
         root: Path | None = None,
     ) -> None:
         self.night = night
-        self.config = config if config is not None else load_night_config(night)
+        self.preset = preset
+        self.config = _resolve_config(night, preset, config, root)
         self.topology = (
             topology if topology is not None else load_topology(self.config.topology_path(root))
         )
@@ -77,8 +92,14 @@ class NightGuardEnv(gym.Env[np.ndarray, np.int64]):
     ) -> tuple[np.ndarray, dict[str, Any]]:
         """Start a new night. PROJECT.md 6."""
         super().reset(seed=seed)
-        rng = np.random.default_rng(seed) if seed is not None else self.np_random
-        self._sim = NightSim(self.config, rng, topology=self.topology)
+        # Always spawn from ``self.np_random``, never from a second generator built here.
+        # Gymnasium seeds ``self.np_random`` from ``SeedSequence(seed)``, which is bit-identical to
+        # ``default_rng(seed)``, so ``reset(seed=k)`` still matches ``NightSim.from_seed(k)``. But
+        # ``SimRng`` spawns *children* and advances the parent's spawn counter, so consecutive
+        # unseeded resets get fresh substreams. Building a fresh generator on the seeded path meant
+        # the next unseeded reset spawned children 0..5 a second time and replayed the seeded
+        # episode verbatim -- which is exactly what SB3 does, once per run.
+        self._sim = NightSim(self.config, self.np_random, topology=self.topology)
         self._reward.reset()
         # Seeded from config, never from live state: see obs.BeliefTracker.seeded.
         self._belief = obs_mod.BeliefTracker.seeded(self.config)
@@ -114,6 +135,9 @@ class NightGuardEnv(gym.Env[np.ndarray, np.int64]):
             "tick": state.tick,
             "time_s": self.sim.clock.time_s(state.tick),
             "power_pct": state.power_pct,
+            # Camera duty cycle is the fraction of decision steps with the monitor raised: the
+            # quantity that both drains power and opens the office. PROJECT.md 7, v1.1 criterion 6.
+            "monitor_up": state.office.monitor_up,
             "blackout": state.blackout,
             "blackout_phase": (
                 None if state.blackout_state is None else state.blackout_state.phase.name

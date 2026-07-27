@@ -13,3 +13,8 @@ traces/
 # Generated traces and viewer samples
 src/nightguard/viewer/samples/
 src/nightguard/viewer/trace.jsonl
+
+# Training artefacts. Checkpoints and per-run logs are large and regenerable; the committed
+# exception is runs/summary.json, which is what validate.py reads the v1.1 criteria from.
+runs/*
+!runs/summary.json
