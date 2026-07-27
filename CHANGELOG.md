@@ -2,6 +2,52 @@
 
 ## v1.0 — Environment
 
+A Gymnasium interface over the validated simulator. All seven exit criteria met; `validate.py` now
+runs **81 checks**, covering v0.1 through v1.0.
+
+### The environment
+
+`env/obs.py`, `env/reward.py`, `env/nightguard_env.py` and `env/wrappers.py`. Everything about *what
+happens* stays in `core/`; this layer only decides what the agent is told and what it is paid.
+Ground truth reaches the caller through `info`, never through `obs`.
+
+**§6.2's observation is now 100 dims, not 98.** Two jam bits were added, inserted into the office
+block rather than appended, so every later block shifts by two. The decisive argument is not a
+source appeal: a door toggle with invisible semantics is unlearnable, because the agent presses the
+button, nothing happens, and it cannot distinguish "jammed" from "I toggled twice in a row". Jam
+state is office state and the block should read as one coherent unit. Nothing depended on the old
+indices — v1.0 is the first version with an observation at all — so this was the last moment the
+change was free.
+
+**Belief is seeded at reset** from the start state §3 fixes, with staleness 0, and
+`ticks_since_observed` reads 1.0 when never observed. The start never varies and is publicly known,
+so a competent player begins with correct belief; modelling ignorance nobody has would contradict
+§6.2's own design rule. Seeding reads **config, not live state**, which is what keeps the no-leak
+criterion exact. Zero would have collided with "seen this instant" and made staleness jump upward on
+the first sighting, inverting its meaning.
+
+**Two observation channels, not one.** §6.2 joins them with `or`: the camera, and the door light.
+Both corners carry a video feed, so watching a corner camera *is* an observation, and the proximity
+block is the light-specific channel rather than the only corner channel. An earlier draft of the
+plan had this backwards, which would have made both corners camera-invisible, taught the policy that
+peeking at a corner is pointless, and silently broken the wing asymmetry §2.3 depends on — while
+looking entirely plausible. It was caught in review before any code was written.
+
+**`Oracle` carries SPRINTER's stage**, since it has no node. Recorded in §6.4: the measured gap is a
+**lower bound**, because SPRINTER's immunity window and pending attack resolution tick stay hidden.
+An `armed` flag is excluded as exactly `stage == stages_to_arm`.
+
+### Measured
+
+| Criterion | Result |
+|---|---|
+| 1. `check_env` | passes, **0 warnings** |
+| 2. Random episodes | **9,996** across six nights, no exceptions |
+| 3. No position leak | all four entities, hidden / in-office / jammed / lights-on, plus a non-vacuity check |
+| 4. Throughput | **100,000 steps in 2.1 s** with encoding active — 47,026 steps/s on x86_64 Linux, Python 3.14.4 |
+| 5. `reset(seed=k)` | identical trajectories |
+| 6. Bounds | **0** observations outside the `Box`; lowest `power_pct` **0.000000** |
+
 ### v0.3 follow-ups
 
 - **Power can no longer go negative.** The drain triggered blackout at `power_pct <= 0` but never

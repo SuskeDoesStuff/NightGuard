@@ -925,7 +925,7 @@ Provide `--stride N` on the writer to subsample to decision steps for long batch
 
 ### 6.2 Observation space
 
-`gymnasium.spaces.Box(low=0.0, high=1.0, shape=(98,), dtype=np.float32)`.
+`gymnasium.spaces.Box(low=0.0, high=1.0, shape=(100,), dtype=np.float32)`.
 
 The design rule: **give the agent exactly what a human player perceives, and nothing more.**
 Never leak true entity positions into the observation. That is what the `Oracle` wrapper is
@@ -934,13 +934,27 @@ for.
 | Block | Dims | Contents |
 |---|---|---|
 | Resources | 2 | `power / 99.0`, `time_s / 535.0` |
-| Office | 5 | `door_left`, `door_right`, `light_left`, `light_right`, `monitor_up` |
+| Office | 7 | `door_left`, `door_right`, **`jam_left`, `jam_right`**, `light_left`, `light_right`, `monitor_up` |
 | Camera | 12 | one-hot over cameras 0–10, plus a twelfth slot for "monitor down" |
 | Belief × 4 | 56 | per entity: 12-dim one-hot of last observed node (all-zero if never observed), 1 normalised `ticks_since_observed`, 1 `visible_now` flag → 14 dims × 4 |
 | Audio | 4 | `footstep`, `kitchen`, `running`, `bang` |
 | Door proximity | 2 | `left_occupied`, `right_occupied`; non-zero **only** on a step in which the corresponding light was flashed |
 | Last action | 17 | one-hot |
-| **Total** | **98** | |
+| **Total** | **100** | |
+
+**The jam bits were added in v1.0**, inserted into the office block rather than appended, so every
+block after it shifts by two. A door toggle with invisible semantics is unlearnable: the agent
+presses the button, nothing happens, and it cannot distinguish "jammed" from "I toggled twice in a
+row". Jam state is office state and the block should read as one coherent unit; nothing depended on
+the earlier indices, since v1.0 is the first version with an observation at all. Recorded in §10.
+
+**Belief is seeded at reset from the start state §3 fixes**, with `ticks_since_observed` at 0. The
+start never varies and is publicly known, so a competent player begins with correct belief, and
+modelling ignorance nobody has would contradict the design rule above. Seeding reads the **config**,
+not live state, which is what keeps §7's no-leak criterion exact. `ticks_since_observed` reads
+**1.0 when never observed** — maximally stale, which is what it is; 0.0 would collide with "seen
+this instant" and make the feature jump upward on the first sighting. Under the seeded start that
+case is unreachable, but it stays defined for v2.0's randomised configurations.
 
 For SPRINTER, the 12-dim "node" slot instead encodes its stage as a one-hot over
 `{unknown, 0, 1, 2, 3}` in the first five slots, with the rest zero. Document this clearly
@@ -953,6 +967,14 @@ about belief decay at all.
 **An entity is "observed" this step if and only if:** the monitor is up and the entity's node
 equals the selected camera and that node has a video feed; or the entity is at a door corner
 and the corresponding light was flashed this step.
+
+These are **two independent channels**, and conflating them is a plausible-looking encoder bug.
+Both corners carry a video feed, so watching a corner camera *is* an observation; the door-proximity
+block is the light-specific channel, not the only corner channel. Treating the light as the sole
+path would make both corners camera-invisible, teach the policy that peeking at a corner is
+pointless, and silently break the wing asymmetry §2.3 depends on. SPRINTER has no position and is
+never visually observable at all — audio is its only channel, which is the asymmetry §3.7 exists to
+create.
 
 `E_KITCHEN` has no video feed, so selecting it never produces a visual observation. Its
 occupancy is conveyed only through the `kitchen` audio signal.
@@ -985,10 +1007,17 @@ alongside the dense one from v2.0.
 
 | Wrapper | Purpose |
 |---|---|
-| `Oracle` | Appends true node indices for all four entities. Used to measure the partial-observability gap as a number rather than assume it. Non-negotiable; build it in v1.0. |
+| `Oracle` | Appends ground truth for all four entities: three node indices plus SPRINTER's stage, normalised. Used to measure the partial-observability gap as a number rather than assume it. Non-negotiable; built in v1.0. |
 | `PreviousAction` | Already folded into the base observation, but provide the wrapper form for POPGym-style comparability. |
 | `AudioMask` | Zeroes the audio block. Ablation: how much does the environment depend on the audio channel? |
 | `FrameStack` | Provided for completeness. Note in its docstring that a stack deep enough to cover a 15 s WARDEN countdown would need 30 frames at 0.5 s, which is why recurrence is the intended approach. |
+
+**The Oracle gap is a lower bound.** SPRINTER carries its stage because it has no node, but its
+genuinely hidden state is larger than that: the immunity window (`immune_until_tick`) and the
+pending attack resolution tick are both invisible and both determine whether a peek is safe. The
+wrapper does not expose them, so an Oracle-versus-base comparison understates the true gap. v1.1
+must not over-read the number. An `armed` flag is deliberately excluded: it is exactly
+`stage == stages_to_arm` and could never disagree with the value beside it.
 
 ### 6.5 Vectorisation
 

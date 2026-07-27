@@ -32,8 +32,8 @@ All four must pass before any milestone is called done. See PROJECT.md §11.
 | v0.1 | Clock, power, office controls, DRIFTER + PROWLER | **Done** — tag `v0.1`, commit `19362e1` |
 | v0.2 | WARDEN + SPRINTER, trace format, audio, reference policies | **Done** — tag `v0.2` |
 | v0.3 | Three-phase blackout, validation suite (§8), minimal viewer | **Done** — tag `v0.3` |
-| v1.0 | Gymnasium wrapper, wrappers, vectorised runner | Not started |
-| v1.1 | RecurrentPPO baseline | Not started |
+| v1.0 | Gymnasium wrapper, observation, reward, wrappers | **Done** — tag `v1.0` |
+| v1.1 | RecurrentPPO baseline | **Current** |
 | v1.2 | Replay viewer | Not started |
 | v2.0 | Randomised configs, benchmark table | Not started |
 | v2.1 | Packaging and release | Not started |
@@ -84,6 +84,14 @@ PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning.
   must match the analytic **0.2397** within binomial error (measured 0.2373 at n=10,000). Nights
   2–6 are near zero by design, because SPRINTER is the only kill path for a monitor-down policy.
 - **`rhythm` is frozen.** Tuned once by sweep; do not retune it to chase a number.
+- **The observation is 100 dims**, with jam bits inside the office block and every later block
+  shifted by two. Belief is seeded at reset from **config** — never live state, which is what keeps
+  the no-leak test exact — and `ticks_since_observed` is 1.0 when never observed.
+- **Two observation channels, joined by `or`:** the camera and the door light. Both corners carry
+  video, so a corner camera *is* an observation; the proximity bits are the light-specific channel,
+  not the only corner channel.
+- **The Oracle gap is a lower bound.** SPRINTER's immunity window and pending attack tick stay
+  hidden, so v1.1 must not over-read an Oracle-versus-base comparison.
 - **Blackout rolls one interval in; the 20 s guarantee replaces the roll; a kill roll on the
   boundary counts.** All three settled in §3.11 and §10; each alternative moves §8.7 materially.
 - **A success during an in-flight WARDEN countdown is ignored**, not a restart.

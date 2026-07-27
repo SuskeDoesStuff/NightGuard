@@ -10,13 +10,18 @@ passes by a factor of ten should be visible, not silently green.
 from __future__ import annotations
 
 import hashlib
+import platform
 import sys
 import tempfile
+import time
+import warnings
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+from gymnasium.utils.env_checker import check_env
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -34,6 +39,9 @@ from nightguard.core import (
 from nightguard.core.blackout import apply_onset
 from nightguard.core.power import idle_drain_per_second
 from nightguard.core.state import action_for_camera
+from nightguard.env import NightGuardEnv
+from nightguard.env import obs as obs_mod
+from nightguard.env.actions import ACTION_COUNT
 from nightguard.policies import DoNothing, MonitorDown, Rhythm, run_policy
 from nightguard.trace import write_episode
 
@@ -623,6 +631,184 @@ def check_blackout() -> list[Check]:
     ]
 
 
+# --- v1.0: the Gymnasium environment ------------------------------------------------------------
+
+RANDOM_EPISODES_PER_NIGHT = 10_000 // 6
+ROLLOUT_STEPS = 100_000
+ROLLOUT_BUDGET_S = 60.0
+
+
+def _rollout(env: NightGuardEnv, seed: int) -> list[Any]:
+    observation, _ = env.reset(seed=seed)
+    rng = np.random.default_rng(seed)
+    out = [observation]
+    while True:
+        observation, _, terminated, truncated, _ = env.step(int(rng.integers(ACTION_COUNT)))
+        out.append(observation)
+        if terminated or truncated:
+            return out
+
+
+def check_env_api() -> list[Check]:
+    """v1.0 criterion 1: check_env passes with no warnings."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        check_env(NightGuardEnv(night=4), skip_render_check=True)
+    return [
+        Check(
+            "v1.0-1 check_env",
+            f"{len(caught)} warnings"
+            + (f": {[str(w.message)[:60] for w in caught]}" if caught else ""),
+            not caught,
+        )
+    ]
+
+
+def check_random_episodes() -> list[Check]:
+    """v1.0 criteria 2 and 6: episodes complete, and observations stay inside the Box."""
+    checks = []
+    total = 0
+    out_of_bounds = 0
+    negative_power = 0.0
+    for night in range(1, 7):
+        env = NightGuardEnv(night=night, topology=TOPOLOGY)
+        causes: dict[str, int] = {}
+        for seed in range(RANDOM_EPISODES_PER_NIGHT):
+            for observation in _rollout(env, seed):
+                if not env.observation_space.contains(observation):
+                    out_of_bounds += 1
+            negative_power = min(negative_power, env.sim.state.power_pct)
+            cause = env.sim.state.cause.value if env.sim.state.cause else "NONE"
+            causes[cause] = causes.get(cause, 0) + 1
+            total += 1
+        checks.append(
+            Check(
+                "v1.0-2 episodes", f"night {night}: {sum(causes.values())} episodes, {causes}", True
+            )
+        )
+    checks.append(
+        Check("v1.0-2 episodes", f"{total} episodes completed without exception", total > 0)
+    )
+    checks.append(
+        Check(
+            "v1.0-6 bounds",
+            f"{out_of_bounds} observations outside the declared Box",
+            out_of_bounds == 0,
+        )
+    )
+    checks.append(
+        Check(
+            "v1.0-6 power",
+            f"lowest power_pct across the run: {negative_power:.6f}",
+            negative_power >= 0.0,
+        )
+    )
+    return checks
+
+
+def check_no_position_leak() -> list[Check]:
+    """v1.0 criterion 3: the most important test in the milestone."""
+    checks = []
+    for entity in EntityId:
+        env = NightGuardEnv(night=6, topology=TOPOLOGY)
+        env.reset(seed=0)
+        for _ in range(20):
+            env.step(Action.NOOP)
+        office = env.sim.state.office
+        office.monitor_up = False
+        office.light_left = office.light_right = False
+
+        def encode(bound: NightGuardEnv = env) -> Any:
+            return obs_mod.encode(bound.sim, bound.sim.state, bound._belief, Action.NOOP)
+
+        baseline = encode()
+        leaked = False
+        values = range(4) if entity is EntityId.SPRINTER else [int(n) for n in Node]
+        for value in values:
+            if entity is EntityId.SPRINTER:
+                env.sim.state.sprinter.stage = value
+            elif entity is EntityId.WARDEN:
+                env.sim.state.warden.node = Node(value)
+            else:
+                env.sim.state.entity(entity).node = Node(value)
+            leaked |= not bool((encode() == baseline).all())
+        checks.append(
+            Check(
+                "v1.0-3 no leak",
+                f"{entity.name}: hidden position does not reach the observation",
+                not leaked,
+            )
+        )
+
+    # Non-vacuity: the observation must be capable of changing at all.
+    env = NightGuardEnv(night=6, topology=TOPOLOGY)
+    env.reset(seed=3)
+    env.sim.state.office.monitor_up = True
+    env.sim.state.office.selected_camera = env.sim.drifter.corner
+    env.sim.state.drifter.node = env.sim.drifter.corner
+    env._belief.update(env.sim, env.sim.state)
+    visible = obs_mod.encode(env.sim, env.sim.state, env._belief, Action.NOOP)
+    env.sim.state.drifter.node = Node.W_BACKSTAGE
+    env._belief.update(env.sim, env.sim.state)
+    hidden = obs_mod.encode(env.sim, env.sim.state, env._belief, Action.NOOP)
+    checks.append(
+        Check(
+            "v1.0-3 no leak",
+            "non-vacuity: a visible entity does change the observation",
+            not bool((visible == hidden).all()),
+        )
+    )
+    return checks
+
+
+def check_reset_determinism() -> list[Check]:
+    """v1.0 criterion 5."""
+    env = NightGuardEnv(night=5, topology=TOPOLOGY)
+    script = [int(v) for v in np.random.default_rng(0).integers(0, ACTION_COUNT, size=400)]
+
+    def run() -> list[tuple[float, float]]:
+        observation, _ = env.reset(seed=99)
+        out = [(float(observation.sum()), 0.0)]
+        for action in script:
+            observation, reward, terminated, truncated, _ = env.step(action)
+            out.append((float(observation.sum()), reward))
+            if terminated or truncated:
+                break
+        return out
+
+    return [
+        Check(
+            "v1.0-5 determinism",
+            "reset(seed=99) twice gives identical trajectories",
+            run() == run(),
+        )
+    ]
+
+
+def check_throughput() -> list[Check]:
+    """v1.0 criterion 4, restated by its purpose. Records the figure and the hardware."""
+    env = NightGuardEnv(night=4, topology=TOPOLOGY)
+    rng = np.random.default_rng(0)
+    env.reset(seed=0)
+    start = time.perf_counter()
+    done = 0
+    while done < ROLLOUT_STEPS:
+        _, _, terminated, truncated, _ = env.step(int(rng.integers(ACTION_COUNT)))
+        done += 1
+        if terminated or truncated:
+            env.reset(seed=done)
+    elapsed = time.perf_counter() - start
+    machine = f"{platform.machine()} {platform.system()}, Python {platform.python_version()}"
+    return [
+        Check(
+            "v1.0-4 throughput",
+            f"{ROLLOUT_STEPS:,} steps with observation encoding in {elapsed:.1f}s "
+            f"({ROLLOUT_STEPS / elapsed:,.0f} steps/s) on {machine}",
+            elapsed < ROLLOUT_BUDGET_S,
+        )
+    ]
+
+
 def main() -> int:
     """Run every check and print a table."""
     checks: list[Check] = []
@@ -642,6 +828,11 @@ def main() -> int:
         check_warden_latency,
         check_sprinter_curve,
         check_blackout,
+        check_env_api,
+        check_random_episodes,
+        check_no_position_leak,
+        check_reset_determinism,
+        check_throughput,
     ):
         checks += step()
 

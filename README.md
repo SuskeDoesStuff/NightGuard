@@ -9,10 +9,10 @@ information and one of its costliest actions.
 
 ## Status
 
-**v0.3 — Fidelity lock.** The full three-phase blackout, the §8 validation suite, and a minimal
-trace viewer. Every statistical assertion is an agreement test against an analytic derivation
-recorded in `CHANGELOG.md` before it was measured. No Gymnasium wrapper, no observations, no
-reward — `env/actions.py` is the only `env/` code.
+**v1.0 — Environment.** A Gymnasium interface over the validated simulator: a 100-dim observation,
+§6.3's reward with `sparse_mode`, and the `Oracle`, `PreviousAction`, `AudioMask` and `FrameStack`
+wrappers. Ground truth reaches the caller through `info`, never through `obs`. No training yet —
+that is v1.1.
 
 ## Install
 
@@ -22,6 +22,16 @@ python -m venv .venv
 ```
 
 ## Use
+
+```python
+from nightguard.env import NightGuardEnv
+
+env = NightGuardEnv(night=4)
+obs, info = env.reset(seed=918442)
+obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
+```
+
+Or drive the simulator directly, without the RL layer:
 
 ```python
 from nightguard.core import Action, NightSim, load_night_config
@@ -53,7 +63,7 @@ of §8, printing each measured value alongside its target.
 src/nightguard/core/       Pure simulation. No gymnasium, no torch, no global randomness.
 src/nightguard/trace/      JSONL serialisation of ground truth. Depends on core only.
 src/nightguard/policies/   Scripted reference policies: do_nothing, rhythm, monitor_down.
-src/nightguard/env/        Gymnasium layer. Only the action space until v1.0.
+src/nightguard/env/        Gymnasium layer: env, observation, reward, wrappers.
 src/nightguard/viewer/     Static HTML/JS trace viewer. No server, no build step.
 src/nightguard/derivations.py  Analytic predictions for the section 8 suite.
 configs/                   Topology and night presets. All numeric constants live here.
