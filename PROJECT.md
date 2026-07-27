@@ -683,9 +683,14 @@ survival rate materially. All three are settled here and recorded in §10.
    0.6367**, which is 4.5σ at n = 10,000, so a correct implementation would fail §8.7 on
    convention alone and the failure would look like a blackout bug.
 
-**Phase 1 starts from the onset tick,** not from the tick on which power first went negative.
-Power is detected at or below zero at §3.13 step 3 and onset is applied in the same tick, so the
-two coincide today; stating it fixes the reference point should they ever diverge.
+**Phase 1 starts from the onset tick**, which is the tick on which §3.13 step 3 detects the
+crossing and applies onset. The `blackout` event stamp and the phase anchor both use that tick, so
+they agree by construction. **Onset also zeroes power**: the state is "power exhausted", and a
+trace depicting a blackout with a quarter of the battery left is internally contradictory.
+
+Forcing a blackout for measurement (§8.7) must therefore zero power and let this rule fire, not
+call onset from outside the tick loop — doing the latter stamps the event with an already-written
+tick and makes the trace show it one record late.
 
 Reaching `t = 535.0 s` mid-sequence is `SURVIVED`, per §3.1. Blackout is not a separate outcome:
 only being killed during it is, and that is `KILLED_BLACKOUT` (§3.12).
@@ -713,7 +718,12 @@ failures.
    tick they occur on. Stamped with the previous tick, SPRINTER's grace period expires exactly
    on the next decision boundary, leaving no step in which to close the door and making §3.7's
    0.5 s reaction window unreachable on the monitor-raise path.
-3. Drain power. If power ≤ 0 and not already in blackout, enter blackout.
+3. Drain power, **unless already in blackout**. If power ≤ 0, clamp it to 0 and enter blackout.
+   The drain is skipped once in blackout because power is exhausted; continuing to model it as a
+   shrinking negative quantity is meaningless. The clamp is in the same branch that sets the flag,
+   because SPRINTER's bang applies a discrete `1 + 5n` cost outside this step and a late one can
+   overshoot zero by a wide margin in a single tick. §6.2 encodes `power / 99.0` into a
+   `Box(low=0.0)`, so a negative value is either a hard failure or a silent out-of-range input.
 4. If in blackout, advance the blackout state machine and check for kill. Return.
 5. Decrement WARDEN's countdown; if it expires, execute the move.
 6. For each entity in fixed order `[WARDEN, DRIFTER, PROWLER, SPRINTER]`: if its opportunity
@@ -1083,7 +1093,20 @@ wrappers. Vectorised runner.
 2. 10,000 random-policy episodes across all six nights complete without exception.
 3. Observation vector never contains a true entity position, verified by a test that
    perturbs a hidden entity and asserts the observation is unchanged.
-4. Vectorised runner achieves ≥ 50,000 decision steps/s/core at N=256.
+4. A 100,000-step rollout using the v1.1 policy architecture completes in under 60 seconds of
+   environment time on one core, measured with observation encoding active. **Record the figure and
+   the hardware.**
+
+   This replaces "≥ 50,000 decision steps/s/core at N=256". That number was never derived from
+   anything, and §6.5's own feasibility argument states the actual requirement: throughput that
+   "puts a full PPO run in the tens of minutes on a laptop". Two machines running identical code
+   measured 73,726 and 13,031 decision steps/s — a 5.7× spread — so the original criterion passes on
+   one and fails on the other. A gate that swings on the host is measuring the host, and would fail
+   unpredictably on CI or a colleague's laptop while looking like a regression. The environment is a
+   single-digit percentage of v1.1's wall clock at either figure. Revisit in v1.1 with the training
+   loop as the benchmark; if profiling shows the environment is genuinely the bottleneck, vectorise
+   then, against a measured need and with an object-versus-vectorised equivalence test as a hard
+   gate.
 5. `reset(seed=k)` twice produces identical trajectories under a fixed action sequence.
 
 ### v1.1 — Baseline policy
@@ -1146,6 +1169,9 @@ Every statistical assertion must be accompanied by a check demonstrating the tes
   passing by a factor of ten is visible rather than silently green.
 - Any assertion that is structurally unable to fail at the current milestone must be marked
   `provisional` in the test file, with a note stating which milestone restores its meaning.
+- This applies to human verification steps as well as automated assertions. A manual check requires
+  a fixture capable of exercising it, and that fixture must be named alongside the check rather than
+  assumed. **A verification step that cannot fail reports nothing.**
 
 ### 8.1 Passive power curves
 
@@ -1360,6 +1386,26 @@ scrub back thirty steps from a death and determine whether
 
 Render `V(s)` as a sparkline over the last 100 steps so this is visible at a glance.
 
+### 9.3.1 Verification fixtures
+
+Per §8.0, a manual check needs a fixture capable of exercising it. These two are confirmed to
+contain what they claim, and together they cover the viewer's checklist:
+
+```bash
+# ~1130 records. jams (False,False) -> (False,True), PROWLER walking 0,1,7,8,9,10 into the OFFICE,
+# DRIFTER 0,1,6, invasion_prowler and death_prowler, footstep and kitchen audio, KILLED_PROWLER.
+python scripts/export_trace.py --night 5 --seed 0 --policy random --out trace.jsonl
+
+# ~950 records. WARDEN's full path 0,1,7,8,9,10, SPRINTER stages 0->3, warden_countdown_start and
+# warden_retreat, a natural blackout through all three phases, death_blackout.
+python scripts/export_trace.py --night 6 --seed 7 --policy rhythm --stride 5 --out trace.jsonl
+```
+
+A roster-disabled forced-blackout trace is **not** a viewer fixture: every entity token sits on
+`STAGE` for the whole episode, no entity event fires, and `jams` is `(False, False)` in every
+record, so the `JAMMED` versus `open` distinction the check demands is unreachable rather than
+merely unverified. Keep that trace as §8.7's isolated fixture only.
+
 ### 9.4 Also required
 
 - Event markers on the scrubber for every non-null `event` field.
@@ -1397,6 +1443,11 @@ comment at its point of use.
 | Does a kill roll on the survival boundary count? | Yes, inclusive. | The strict reading moves §8.7 from 0.6148 to 0.6367 — 4.5σ at n=10,000 — so a correct implementation would fail on convention alone and the failure would look like a bug. |
 | §8.4's test family and flat region | `k ∈ {0.5, 1.0}` hard zero, bound stated as 1.4 s; curve family `{1.5, 2, 4, 6, 8, 10, 15, 20, ∞}`. | `k` must be a whole number of 0.5 s decision steps, so 0.75 and 1.25 are unreachable; and immunity ceilings to 9 ticks, so the realised minimum window is 0.9 s, not 0.83 s. |
 | §5's frozen shape vs §9.1's viewer requirements | Extend to trace 1.1 with `jams` and `blackout`. | §9.1 requires `JAMMED` to be distinguishable from `open` and the blackout phase to be visible, and 1.0 carried neither. Blackout did not exist when the shape was frozen, so this is an addition rather than a change; readers treat missing keys as absent. No further extension before v1.2. |
+| §7's v1.0 throughput criterion | Restated by its purpose: a 100,000-step rollout under 60 s of env time on one core, figure and hardware recorded. | The 50,000 figure was never derived. Identical code measured 73,726 and 13,031 steps/s on two machines, so the gate measured the host, not the environment. §6.5's stated requirement — a PPO run in tens of minutes — holds at either. |
+| Does power go negative? | No. Clamped to 0 at onset, and the drain is skipped entirely while in blackout. | SPRINTER's discrete `1 + 5n` bang overshot zero by up to 19.5 pp, and §6.2 encodes `power / 99.0` into a `Box(low=0.0)`. |
+| Is jam state observable? | Yes — two bits, inserted into §6.2's office block. | A toggle with invisible semantics is unlearnable: the agent cannot distinguish "jammed" from "I toggled twice". Jam state is office state, so it belongs in that block rather than appended. |
+| What does `Oracle` expose for SPRINTER? | Its stage, normalised. | SPRINTER has no node. A constant would reveal nothing and understate the gap the wrapper exists to measure; an `armed` flag is exactly `stage == 3` and can never disagree with the value beside it. |
+| Belief at reset | Seeded from §3's deterministic start state, staleness 0. | The start state never varies and is publicly known, so a competent player begins with correct belief. Seeded from **config**, not live state, so the no-leak test stays exact. |
 | §8.3's censored mean at low AI | Measure on a lengthened night so every level completes. | At AI 1 the walk is ~335 s of a 535 s night, so the sample mean is censored and biased downward for reasons unrelated to fidelity. §8.3 is already synthetic. |
 
 ---

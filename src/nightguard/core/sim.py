@@ -55,7 +55,7 @@ class EpisodeResult:
             plateaus.
         ticks: Sim ticks elapsed.
         time_s: Elapsed simulated time, in seconds.
-        final_power_pct: Remaining power in percentage points, floored at 0 for reporting.
+        final_power_pct: Remaining power in percentage points. Never negative; see 3.13 step 3.
         ai_levels: End-of-night AI levels, indexed by :class:`EntityId`.
         escalations_applied: How many hour-boundary escalation events fired.
         events: ``(tick, name)`` pairs for every notable event.
@@ -221,7 +221,7 @@ class NightSim:
             cause=state.cause,
             ticks=state.tick,
             time_s=self.clock.time_s(state.tick),
-            final_power_pct=max(0.0, state.power_pct),
+            final_power_pct=state.power_pct,
             ai_levels=tuple(state.ai_levels),
             escalations_applied=state.escalations_applied,
             events=tuple(state.events),
@@ -259,11 +259,18 @@ class NightSim:
         # no step in which to close the door — the 0.5 s reaction window 3.7 specifies.
         self._resolve_monitor_transition()
 
-        # 3. Drain power; enter blackout at zero.
-        active = power.active_units(state.office, self.config.power)
-        state.power_pct -= power.drain_per_tick(active, self.config.power, self.clock.sim_tick_s)
-        if state.power_pct <= 0.0 and not state.blackout:
-            blackout.apply_onset(state)
+        # 3. Drain power; enter blackout at zero. The drain is skipped once in blackout: power is
+        #    exhausted, and continuing to model it as a shrinking negative quantity is meaningless.
+        #    SPRINTER's bang applies a discrete 1 + 5n cost, so a late bang can overshoot zero by
+        #    a wide margin in one tick; power is clamped in the same branch that sets the flag.
+        if not state.blackout:
+            active = power.active_units(state.office, self.config.power)
+            state.power_pct -= power.drain_per_tick(
+                active, self.config.power, self.clock.sim_tick_s
+            )
+            if state.power_pct <= 0.0:
+                state.power_pct = 0.0
+                blackout.apply_onset(state)
 
         # 4. If in blackout, advance its state machine and check for a kill. All entities except
         #    WARDEN are removed from consideration, which is why this returns before step 5.

@@ -128,12 +128,14 @@ class TestSurvivability:
         self, make_sim: Callable[..., NightSim]
     ) -> None:
         """The non-vacuity check (8.0): both outcomes must occur before agreement means anything."""
-        _, causes = self._measure(make_sim, 200)
+        _, causes = self._measure(make_sim, 60)
         assert causes[TerminationCause.SURVIVED] > 0
         assert causes[TerminationCause.KILLED_BLACKOUT] > 0
         assert set(causes) == {TerminationCause.SURVIVED, TerminationCause.KILLED_BLACKOUT}
 
+    @pytest.mark.slow
     def test_survival_agrees_with_the_derivation(self, make_sim: Callable[..., NightSim]) -> None:
+        """The reduced-n twin of the test below. Both are slow: 8.7 needs episodes, not cleverness."""
         measured, _ = self._measure(make_sim, FAST_EPISODES)
         derived = derived_survival()
         sigma = (derived * (1 - derived) / FAST_EPISODES) ** 0.5

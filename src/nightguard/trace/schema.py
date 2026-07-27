@@ -136,7 +136,7 @@ def tick_record(
         "t": state.tick,
         "time_s": round(sim.clock.time_s(state.tick), TIME_DECIMALS),
         "hour": sim.clock.hour_at_tick(state.tick),
-        "power": round(max(0.0, state.power_pct), POWER_DECIMALS),
+        "power": round(state.power_pct, POWER_DECIMALS),
         "doors": [office.door_left, office.door_right],
         # Added in trace 1.1. 9.1 requires a jammed door to read JAMMED rather than open, and the
         # blackout phase to be visible; the 1.0 shape carried neither, and blackout did not exist
@@ -198,7 +198,7 @@ def footer_record(
         "type": "footer",
         "terminated_at": state.tick,
         "cause": None if state.cause is None else state.cause.value,
-        "final_power": round(max(0.0, state.power_pct), POWER_DECIMALS),
+        "final_power": round(state.power_pct, POWER_DECIMALS),
         "return": None,
         "cam_duty_mean": round(cam_duty_mean, POWER_DECIMALS),
     }

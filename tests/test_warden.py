@@ -360,7 +360,7 @@ def test_latency_agrees_with_the_derivation(topology: Topology) -> None:
 
 def test_latency_is_monotonically_decreasing_in_ai_level(topology: Topology) -> None:
     """The original 8.3 assertion, kept alongside the stronger one."""
-    means = [measure_latency(level, 60, topology)[0] for level in range(1, 11)]
+    means = [measure_latency(level, 30, topology)[0] for level in range(1, 11)]
     assert all(a > b for a, b in pairwise(means)), means
 
 

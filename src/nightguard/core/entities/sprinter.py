@@ -116,7 +116,10 @@ class Sprinter:
 
         cost = self.config.bang_base_pct + self.config.bang_increment_pct * sprinter.bang_count
         sprinter.bang_count += 1
-        state.power_pct -= cost
+        # Clamped at zero: the bang is a discrete 1 + 5n cost applied outside the drain step, so a
+        # late one can overshoot by a wide margin. Power is a quantity you cannot overspend; the
+        # crossing is picked up by 3.13 step 3 on the next tick, which enters blackout.
+        state.power_pct = max(0.0, state.power_pct - cost)
         state.audio.bang = True
         state.record("bang")
 

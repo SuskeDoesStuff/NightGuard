@@ -15,12 +15,12 @@ from nightguard.core import (
     NightConfig,
     NightSim,
     Node,
+    SimState,
     Topology,
     load_night_config,
     load_topology,
     with_levels,
 )
-from nightguard.core.blackout import apply_onset
 from nightguard.core.config import EscalationEvent
 
 # The idle drain table of PROJECT.md 3.10, as (night, night_divisor).
@@ -97,14 +97,24 @@ def clear_stage(sim: NightSim) -> None:
 
 
 def force_blackout_at(sim: NightSim, sim_tick: int) -> NightSim:
-    """Run to ``sim_tick`` and force blackout onset there. PROJECT.md 8.7.
+    """Zero power so the simulation enters blackout on ``sim_tick`` by its own rule. PROJECT.md 8.7.
 
-    8.7 specifies "power forced to 0 at t = 500 s"; forcing onset directly makes the remaining
-    budget exact rather than dependent on where the drain happens to cross zero.
+    8.7 specifies "power forced to 0 at t = 500 s". Power is zeroed on the preceding tick and the
+    crossing is then detected by 3.13 step 3, so onset happens in-band: the event stamp and
+    ``phase_started_tick`` agree, and nothing mutates state between ticks. Calling ``apply_onset``
+    from outside the tick loop instead would stamp the event with the already-written tick and make
+    the trace show it one record late.
     """
+    target = sim_tick - 1
+
+    def zero_power(state: SimState, _action: Action | None) -> None:
+        if state.tick == target:
+            state.power_pct = 0.0
+
+    sim.on_tick = zero_power
     while sim.state.tick < sim_tick and not sim.state.terminated:
         sim.step(Action.NOOP)
-    apply_onset(sim.state)
+    sim.on_tick = None
     return sim
 
 

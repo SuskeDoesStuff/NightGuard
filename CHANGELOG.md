@@ -1,5 +1,53 @@
 # Changelog
 
+## v1.0 — Environment
+
+### v0.3 follow-ups
+
+- **Power can no longer go negative.** The drain triggered blackout at `power_pct <= 0` but never
+  clamped, and then kept draining throughout the blackout. SPRINTER's bang applies a discrete
+  `1 + 5n` cost outside the drain step, so a late one overshot by a wide margin: night 6 with both
+  doors held reached **−14.6 pp at onset and −19.5 pp at death** across 300 seeds. §6.2 encodes
+  `power / 99.0` into a `Box(low=0.0)`, so this would have been either a `check_env` failure or,
+  worse, a silent out-of-range input the policy trained against. Power is now clamped in the same
+  branch that sets the flag, the drain is skipped entirely while in blackout, and the bang clamps at
+  zero. The three exposed `max(0.0, …)` guards are gone; the invariant is asserted per tick instead,
+  so a future discrete cost fails loudly rather than being papered over. §3.13 step 3 updated.
+- **Forcing a blackout now zeroes power, and onset is in-band.** `--force-blackout-at` forced the
+  blackout *state* without the *power*, so the one trace a human actually looks at depicted a
+  blackout with a quarter of the battery left. Forcing now zeroes power one tick early and lets
+  §3.13 step 3 detect the crossing, which also fixes the event stamp: calling `apply_onset` from
+  outside the tick loop stamped it with an already-written tick and the trace showed it one record
+  late. Onset now lands on exactly the intended tick with power at 0.0.
+- **Fast suite 23.4 s → 11.5 s.** `test_survival_agrees_with_the_derivation` alone was 11.4 s — a
+  slow test wearing a fast marker, duplicating its own `slow` twin at lower n.
+- **§8.0 extended to human verification steps**, and §9.3.1 names two confirmed viewer fixtures.
+  v0.3's suggested fixture could not exercise most of criterion 5: with the roster disabled every
+  entity token sits on `STAGE` for all 5,290 records, no entity event fires, and `jams` is
+  `(False, False)` throughout, so the `JAMMED` versus `open` distinction was unreachable rather than
+  merely unverified. That is the same failure mode as a silently shadowed check, one level down.
+- **§7's v1.0 throughput criterion restated by its purpose.** See below.
+
+### §7 criterion 4: why a throughput number was replaced
+
+Identical code, identical setup (night 4, single environment, all-`NOOP`, 152 steps per episode):
+
+| Machine | Decision steps/s | Against the 50,000 gate |
+|---|---|---|
+| This host | **73,726** | passes |
+| Reference host (throttled sandbox) | **13,031** | fails, by 3.8× |
+
+A 5.7× spread on the same code means the gate was measuring the host. It would pass here, fail on
+CI or a colleague's laptop, and the failure would read as a regression. The 50,000 figure was never
+derived from anything; §6.5's own feasibility argument states the requirement as a PPO run finishing
+in tens of minutes, and the environment is a single-digit percentage of v1.1's wall clock at either
+measurement — 27 s of environment time for a 2,000,000-step run here, ~154 s there.
+
+Criterion 4 is now: *a 100,000-step rollout using the v1.1 policy architecture completes in under
+60 s of environment time on one core, with observation encoding active; record the figure and the
+hardware.* That passes on both hosts (1.4 s and ~7.7 s) and is revisited in v1.1 with the training
+loop as the benchmark. Recorded as a §10 row.
+
 ## v0.3 — Fidelity lock
 
 ### v0.2 follow-ups

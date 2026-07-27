@@ -140,3 +140,56 @@ def test_holding_both_doors_all_night_is_impossible(night: int) -> None:
     config = PowerConfig(night_divisor=NIGHT_DIVISORS[night])
     both_doors = drain_per_second(2, config)
     assert config.start_pct / both_doors < 535.0
+
+
+# --- v1.0 exit criterion 6: power never goes negative -------------------------------------------
+
+# PROJECT.md 3.11 and 3.13 step 3. SPRINTER's bang applies a discrete 1 + 5n cost outside the drain
+# step, so a late bang can overshoot zero by a wide margin in a single tick; before v1.0 the drain
+# then continued throughout the blackout and power reached -19.5 pp. §6.2 encodes power / 99.0 into
+# a Box(low=0.0), so a negative value either fails check_env or silently trains the policy against
+# an out-of-range input. This is the regression guard, asserted per tick rather than per episode.
+POWER_FLOOR_NIGHTS = (1, 4, 6)
+POWER_FLOOR_SEEDS = 60
+
+
+@pytest.mark.parametrize("night", POWER_FLOOR_NIGHTS)
+def test_power_never_goes_negative_at_any_tick(
+    night: int, make_sim: Callable[..., NightSim]
+) -> None:
+    """v1.0 exit criterion 6, under the roster most likely to overshoot: both doors shut."""
+    worst = float("inf")
+    for seed in range(POWER_FLOOR_SEEDS):
+        sim = make_sim(night=night, seed=seed)
+        sim.state.office.door_left = True
+        sim.state.office.door_right = True
+        observed = [float("inf")]
+
+        def hook(state, _action, tracker=observed):
+            tracker[0] = min(tracker[0], state.power_pct)
+
+        sim.on_tick = hook
+        sim.run()
+        worst = min(worst, observed[0])
+    assert worst >= 0.0, f"night {night}: power reached {worst}"
+
+
+def test_no_power_drains_during_blackout(make_sim: Callable[..., NightSim]) -> None:
+    """Power is exhausted at onset; modelling it as a shrinking negative quantity is meaningless."""
+    reached = 0
+    for seed in range(40):
+        sim = make_sim(night=6, seed=seed)
+        sim.state.office.door_left = True
+        sim.state.office.door_right = True
+        during: list[float] = []
+
+        def hook(state, _action, tracker=during):
+            if state.blackout:
+                tracker.append(state.power_pct)
+
+        sim.on_tick = hook
+        sim.run()
+        if during:
+            reached += 1
+            assert during == [0.0] * len(during), f"seed {seed}: power moved during blackout"
+    assert reached > 0, "no episode reached blackout; the assertion would be vacuous"

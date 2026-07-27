@@ -66,11 +66,13 @@ def apply_onset(state: SimState) -> None:
     removed from consideration, including any already in the office and including an armed
     SPRINTER; the simulator enforces that by skipping them once ``state.blackout`` is set.
 
-    Phase 1's timer starts from this tick, not from the tick power first went negative. The two
-    coincide today because onset is applied in the same tick the crossing is detected, but the
-    reference point is fixed here in case they ever diverge.
+    **The onset tick is the tick on which this runs.** Both the ``blackout`` event stamp and
+    ``phase_started_tick`` use it, so they agree by construction. Power is zeroed here rather than
+    left at whatever the crossing produced: the state this function names is "power exhausted", and
+    a trace depicting a blackout with a quarter of the battery left is internally contradictory.
     """
     state.blackout = True
+    state.power_pct = 0.0
     state.blackout_state = BlackoutState(phase_started_tick=state.tick)
     state.office.door_left = False
     state.office.door_right = False

@@ -21,7 +21,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nightguard.core import Action, NightConfig, NightSim, load_night_config
-from nightguard.core.blackout import apply_onset
 from nightguard.policies import DoNothing, MonitorDown, RandomPolicy, Rhythm, observe
 from nightguard.trace import TraceWriter
 
@@ -80,13 +79,24 @@ def main() -> int:
     with TraceWriter(
         args.out, sim, night=args.night, seed=args.seed, stride=args.stride, policy=args.policy
     ):
+        # Force by zeroing power one tick early and letting 3.13 step 3 detect the crossing, so
+        # onset happens in-band: the event stamp and phase_started_tick agree, and the trace shows
+        # a blackout with an empty battery rather than a quarter of one.
+        emit = sim.on_tick
+
+        def hook(state, action):
+            if onset_tick is not None and state.tick == onset_tick - 1:
+                state.power_pct = 0.0
+            if emit is not None:
+                emit(state, action)
+
+        sim.on_tick = hook
         step = 0
         while not sim.state.terminated:
-            if onset_tick is not None and sim.state.tick >= onset_tick and not sim.state.blackout:
-                apply_onset(sim.state)
             action = Action.NOOP if sim.state.blackout else policy(observe(sim, sim.state, step))
             sim.step(action)
             step += 1
+        sim.on_tick = emit
 
     cause = sim.state.cause.value if sim.state.cause else "NONE"
     print(f"{args.out}: night {args.night}, seed {args.seed}, {args.policy} -> {cause}")

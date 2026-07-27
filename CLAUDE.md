@@ -42,6 +42,23 @@ Do not begin a version until the previous version's exit criteria pass. v0.3 was
 milestone; the simulator is now fidelity-locked and every §8 assertion is an agreement test against
 an analytic derivation in `CHANGELOG.md`.
 
+## Guidepost: coherence with the source game
+
+**When anything about the animatronics, the office, the doors, the cameras or the power is
+ambiguous, the resolution is how the original game behaves** — not what reads well, not what is
+convenient, not what the spec's phrasing happens to imply. This has decided §3.10's power model,
+§3.4's `E_CORNER` move rather than a kill, §3.5's monitor gate on office entry, and §8.4's freeze
+semantics; each time the source-faithful reading was the one that made the rest of the spec cohere.
+
+**The boundary: where §10 records a deliberate deviation, §10 wins.** The source resolves only what
+the spec leaves open or self-contradictory. §10 holds several deviations on purpose — momentary
+lights where the original holds a button, the 0.5 s decision step, the rare-noise adversary deferred
+to v2.0, the whole naming abstraction — and "fixing" one of those back toward the source breaks the
+thing it was traded for.
+
+A reason recorded as a source fact becomes precedent for the next session. Verify it or leave it
+out; do not record an unverified claim as corroboration.
+
 ## Evidence discipline
 
 - Never derive an expected value by running the implementation. Derive from PROJECT.md, then
