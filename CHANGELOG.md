@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.1 — Baseline policy
+## v1.1-alpha — Baseline policy
 
 The first learned policy: `RecurrentPPO` with an LSTM, a three-stage curriculum, and the
 measurements that turn partial observability into a number.
@@ -9,6 +9,18 @@ This milestone changed character. Up to v1.0 every question had a verifiable rig
 progress comes from experiments, runs take real time, and "the curve is flat" has a dozen causes.
 §7's v1.1 criteria were rewritten to match: they ask for **measurements being made and reported**,
 not for particular numbers. A criterion that demands a number invites tuning until it appears.
+
+### Why `-alpha`
+
+The plain `v1.1` tag is **deliberately unclaimed**. Three of §7's eight exit criteria are misses and
+`validate.py` exits non-zero, so calling this `v1.1` would assert something the measurements do not
+support. §11.1 now separates the two kinds of check — correctness gates, which are defects when red,
+from result criteria, which are measurements — and records that a red result criterion blocks the
+unqualified tag rather than the release. `validate.py` still exits non-zero on any failure; splitting
+the categories so that it exits zero would be weakening a check to make a milestone pass, and is not
+done.
+
+`v1.1` becomes available when a learned policy beats `rhythm`.
 
 ### Exit criteria: 5 of 8 met
 

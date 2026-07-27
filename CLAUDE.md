@@ -25,6 +25,12 @@ The venv is at `.venv/` and is gitignored; prefix with `.venv/bin/` or activate 
 
 All four must pass before any milestone is called done. See PROJECT.md §11.
 
+`validate.py` carries two kinds of check (§11.1). **Correctness gates** — determinism, power, §8's
+fidelity agreements, the no-leak probe — are defects when red and block a release. **Result
+criteria** — §7's v1.1 criteria 3, 4, 5 — are measurements; a red one blocks the *unqualified*
+version tag, not the release. It still exits non-zero either way. Do not split the categories to make
+it exit zero: that is weakening a check to make a milestone pass.
+
 ## Progression
 
 | Version | Scope | Status |
@@ -33,7 +39,7 @@ All four must pass before any milestone is called done. See PROJECT.md §11.
 | v0.2 | WARDEN + SPRINTER, trace format, audio, reference policies | **Done** — tag `v0.2` |
 | v0.3 | Three-phase blackout, validation suite (§8), minimal viewer | **Done** — tag `v0.3` |
 | v1.0 | Gymnasium wrapper, observation, reward, wrappers | **Done** — tag `v1.0` |
-| v1.1 | RecurrentPPO baseline, curriculum, Oracle gap | **Done** — tag `v1.1`, 5 of 8 criteria met |
+| v1.1 | RecurrentPPO baseline, curriculum, Oracle gap | **Alpha** — tag `v1.1-alpha`. 5 of 8 criteria met; `v1.1` unclaimed until a policy beats `rhythm` |
 | v1.2 | Replay viewer | Not started |
 | v2.0 | Randomised configs, benchmark table | Not started |
 | v2.1 | Packaging and release | Not started |

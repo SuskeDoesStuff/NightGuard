@@ -9,8 +9,10 @@ information and one of its costliest actions.
 
 ## Status
 
-**v1.1 — Baseline policy.** `RecurrentPPO` with an LSTM over the v1.0 environment, a three-stage
-curriculum set by measured headroom, and the measurements that make partial observability a number.
+**v1.1-alpha — Baseline policy.** `RecurrentPPO` with an LSTM over the v1.0 environment, a
+three-stage curriculum set by measured headroom, and the measurements that make partial
+observability a number. Tagged `-alpha` deliberately: the plain `v1.1` is unclaimed until a learned
+policy beats `rhythm`.
 
 **The harness works; the policy does not yet.** Four 2M-step arms on night 5 all converge on the
 `monitor_down` degenerate strategy — 824.9 mean steps against the scripted policy's 820.4, dying to
@@ -85,6 +87,9 @@ print(result.cause, result.final_power_pct, sim.clock.decision_steps)
 measured value alongside its target. The v1.1 criteria that cost hours of training are checked
 against the committed `runs/summary.json`; a missing summary fails, so the milestone cannot be
 called done on a repository where the runs were never made.
+
+It currently reports **90 of 94 passing**. The four failures are §7's v1.1 criteria 3, 4 and 5 —
+result criteria rather than correctness gates (§11.1), and the reason this is `v1.1-alpha`.
 
 ## Layout
 

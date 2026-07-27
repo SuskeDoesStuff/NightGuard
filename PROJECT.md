@@ -1570,3 +1570,24 @@ comment at its point of use.
    deliberately and the change is noted in `CHANGELOG.md` with a reason.
 5. No new constant appears in logic; it went into a config dataclass with a default.
 6. No franchise name, character name, or asset appears anywhere in the diff.
+
+### 11.1 Correctness gates versus result criteria
+
+`scripts/validate.py` carries two kinds of check, and from v1.1 they are distinguished.
+
+**Correctness gates** assert that the code does what the spec says: determinism, the closed-form
+power drain, §8's fidelity agreements, the no-leak probe, registration, the observation bounds.
+A red one is a defect. **These block a release.**
+
+**Result criteria** assert that a *trained policy* reached some level of performance — §7's v1.1
+criteria 3, 4 and 5. A red one is a measurement, not a defect, and the v1.1 prompt is explicit that
+these exist so that measurements get made and reported rather than so that numbers get hit: *"a
+criterion that demands one invites tuning until it appears."*
+
+`validate.py` still exits non-zero when **any** check fails, and a result miss is still a miss. What
+changes is what a red result criterion licenses: it blocks the *unqualified* version tag, not the
+release. v1.1 shipped as **`v1.1-alpha`** for exactly this reason — 5 of 8 criteria met, three
+recorded as misses, and the plain `v1.1` tag left unclaimed until a policy earns it.
+
+The rule this replaces nothing of: **never weaken a check to make a milestone pass.** Splitting the
+two categories so that `validate.py` exits zero would be precisely that, and is not done.
