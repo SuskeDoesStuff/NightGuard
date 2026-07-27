@@ -33,7 +33,7 @@ All four must pass before any milestone is called done. See PROJECT.md §11.
 | v0.2 | WARDEN + SPRINTER, trace format, audio, reference policies | **Done** — tag `v0.2` |
 | v0.3 | Three-phase blackout, validation suite (§8), minimal viewer | **Done** — tag `v0.3` |
 | v1.0 | Gymnasium wrapper, observation, reward, wrappers | **Done** — tag `v1.0` |
-| v1.1 | RecurrentPPO baseline, curriculum, Oracle gap | **Current** |
+| v1.1 | RecurrentPPO baseline, curriculum, Oracle gap | **Done** — tag `v1.1`, 5 of 8 criteria met |
 | v1.2 | Replay viewer | Not started |
 | v2.0 | Randomised configs, benchmark table | Not started |
 | v2.1 | Packaging and release | Not started |
@@ -110,6 +110,14 @@ PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning.
   object-versus-vectorised equivalence test is a hard gate.
 - **Training hyperparameters were fixed from a throughput measurement taken before any run.** SB3's
   per-minibatch LSTM padding dominates: 8 minibatches run 191 steps/s, 2 run 750. Not a sweep.
+- **No learned policy beats `rhythm` yet, and v1.1 did not pretend otherwise.** Four 2M-step arms
+  all converge on `monitor_down` (824.9 mean steps against its 820.4, 88% blackout deaths). Criteria
+  3, 4 and 5 are recorded as misses. Do not "fix" this by moving a threshold; the numbers and the
+  reasoning are in `CHANGELOG.md`.
+- **The Oracle gap is unmeasurable while the base arm is at the floor.** Measured −0.0040 ± 0.0040
+  at 1.00σ. §7's criterion 5 says a zero gap means a leak or no need for memory; **it is neither
+  here**, and the stop condition was deliberately not triggered — four independent no-leak checks
+  still pass. Criterion 5 presupposes a base arm that has learned something.
 
 ## Traps
 

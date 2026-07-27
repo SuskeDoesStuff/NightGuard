@@ -56,6 +56,10 @@ class StageResult:
         final: The full held-out evaluation at the end of the stage.
         curve: Periodic evaluations, in order.
         model_path: Where the finished policy was saved.
+        best_path: Where the best policy seen during the stage was saved. On an unstable run the
+            final weights are an arbitrary sample of the oscillation and this is the one worth
+            keeping.
+        best: The evaluation that produced ``best_path``.
     """
 
     stage: str
@@ -66,6 +70,8 @@ class StageResult:
     final: EvalResult
     curve: list[CurvePoint] = field(default_factory=list)
     model_path: str = ""
+    best_path: str = ""
+    best: CurvePoint | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """JSON-serialisable form."""
@@ -77,8 +83,10 @@ class StageResult:
             "reference": self.reference,
             "beats_reference": self.final.survival > self.reference,
             "final": self.final.as_dict(),
+            "best": None if self.best is None else asdict(self.best),
             "curve": [asdict(point) for point in self.curve],
             "model_path": self.model_path,
+            "best_path": self.best_path,
         }
 
 
@@ -124,6 +132,8 @@ def run_stage(
         final=final,
         curve=list(callback.curve),
         model_path=str(model_path.with_suffix(".zip")),
+        best_path=str(callback.best_path.with_suffix(".zip")) if callback.best else "",
+        best=callback.best,
     )
 
 

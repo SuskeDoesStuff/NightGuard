@@ -174,6 +174,8 @@ class EvaluationCallback(BaseCallback):
         self.seeds = eval_seeds(train.eval.curve_episodes, train.eval.seed_offset)
         self.csv_path = csv_path
         self.curve: list[CurvePoint] = []
+        self.best: CurvePoint | None = None
+        self.best_path = csv_path.parent / "best"
         self._next_at = train.eval.every_steps
         self._write_header()
 
@@ -206,6 +208,26 @@ class EvaluationCallback(BaseCallback):
         self.logger.record("eval/survival", point.survival)
         self.logger.record("eval/mean_steps", point.mean_steps)
         self.logger.record("eval/camera_duty_cycle", point.camera_duty_cycle)
+        self._keep_if_best(point)
+
+    def _keep_if_best(self, point: CurvePoint) -> None:
+        """Checkpoint the best policy seen, not just the last one.
+
+        v1.1 needed this the hard way. The `normalised` arm reached 0.1200 survival at 700,000
+        steps and then collapsed; the stage saved its 2,000,000-step weights, which scored 0.0000,
+        and the good policy was unrecoverable. On a run this unstable the final weights are an
+        arbitrary sample of the oscillation, so survival is ranked first and ``mean_steps`` breaks
+        ties -- the latter being the only thing that moves while survival is pinned at zero.
+        """
+        if self.model is None:
+            return
+        better = self.best is None or (point.survival, point.mean_steps) > (
+            self.best.survival,
+            self.best.mean_steps,
+        )
+        if better:
+            self.best = point
+            self.model.save(str(self.best_path))
 
     def evaluate_now(self) -> EvalResult:
         """Run one evaluation and append it to the curve."""

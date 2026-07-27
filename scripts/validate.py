@@ -948,18 +948,30 @@ def check_training_results() -> list[Check]:
         )
     )
 
-    # Both measures are reported. Where the base arm is pinned at zero survival, survival alone
-    # cannot show a gap that mean_steps can, and a zero read off a floor effect would trip this
-    # criterion's stop condition for a reason that has nothing to do with a leak.
+    # A *positive* gap outside sampling error is the only thing that counts. Accepting any non-zero
+    # value would let this pass on the negative, statistically-null result v1.1 actually measured --
+    # a check that cannot fail for the right reason is worth nothing (PROJECT.md 8.0). Both measures
+    # are printed either way, because where the base arm is pinned at zero survival the survival gap
+    # cannot show what mean_steps can.
     gap = criteria.get("oracle_gap", {})
-    survival_gap, steps_gap = gap.get("gap"), gap.get("mean_steps_gap")
+    survival_gap = gap.get("gap")
+    steps_gap = gap.get("mean_steps_gap")
+    episodes = summary.get("episodes", 0)
+    base_rate, oracle_rate = gap.get("base"), gap.get("oracle")
+    sigma = None
+    if episodes and base_rate is not None and oracle_rate is not None:
+        variance = (
+            base_rate * (1 - base_rate) / episodes + oracle_rate * (1 - oracle_rate) / episodes
+        )
+        sigma = None if variance <= 0 else (oracle_rate - base_rate) / variance**0.5
+    verdict = "" if sigma is None else f", {sigma:+.2f} sigma"
     checks.append(
         Check(
             "v1.1-5 oracle gap",
-            f"{gap.get('config')}: survival {gap.get('oracle')} - {gap.get('base')} = "
-            f"{survival_gap}; mean_steps {gap.get('oracle_mean_steps')} - "
+            f"{gap.get('config')}: survival {oracle_rate} - {base_rate} = {survival_gap}"
+            f"{verdict}; mean_steps {gap.get('oracle_mean_steps')} - "
             f"{gap.get('base_mean_steps')} = {steps_gap} (a lower bound, PROJECT.md 6.4)",
-            bool(survival_gap) or bool(steps_gap),
+            sigma is not None and sigma >= 2.0,
         )
     )
 

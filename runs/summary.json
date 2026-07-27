@@ -1,0 +1,322 @@
+{
+  "criteria": {
+    "beats_do_nothing": {
+      "night4": {
+        "do_nothing": 0.0,
+        "episodes": 500,
+        "margin_sigma": 9.02,
+        "passed": true,
+        "policy": 0.14
+      },
+      "night5": {
+        "do_nothing": 0.0,
+        "episodes": 500,
+        "margin_sigma": 1.74,
+        "passed": false,
+        "policy": 0.006
+      },
+      "night6": {
+        "do_nothing": 0.0,
+        "episodes": 500,
+        "margin_sigma": null,
+        "passed": false,
+        "policy": 0.0
+      }
+    },
+    "beats_rhythm_night6": {
+      "episodes": 500,
+      "margin_sigma": null,
+      "passed": false,
+      "policy": 0.0,
+      "rhythm": 0.33
+    },
+    "camera_duty_cycle": {
+      "below_reference": false,
+      "first": 1.0,
+      "last": 0.1765,
+      "logged": true,
+      "lowest": 0.0,
+      "points": 20,
+      "reference": 0.0793,
+      "trend": "falling"
+    },
+    "learning_curve": {
+      "best_mean_steps": 830.86,
+      "best_survival": 0.0,
+      "final_survival": 0.006,
+      "first_mean_steps": 268.74,
+      "first_survival": 0.0,
+      "points": 20,
+      "rises": true,
+      "stage": "stage1-night5"
+    },
+    "oracle_gap": {
+      "base": 0.006,
+      "base_mean_steps": 824.94,
+      "config": "stage1-night5",
+      "gap": -0.004,
+      "mean_steps_gap": -51.36,
+      "note": "a lower bound: PROJECT.md 6.4 \u2014 the Oracle exposes nodes and SPRINTER's stage, but not immune_until_tick or the pending attack tick",
+      "oracle": 0.002,
+      "oracle_mean_steps": 773.58,
+      "timesteps": 2002944
+    }
+  },
+  "episodes": 500,
+  "generated_at": "2026-07-27T16:37:10+00:00",
+  "references": {
+    "custom_max": {
+      "do_nothing": {
+        "camera_duty_cycle": 0.0,
+        "causes": {
+          "KILLED_SPRINTER": 500
+        },
+        "episodes": 500,
+        "mean_return": -9.180000000000003,
+        "mean_steps": 82.0,
+        "standard_error": 0.0,
+        "survival": 0.0
+      },
+      "rhythm": {
+        "camera_duty_cycle": 0.07759032571626275,
+        "causes": {
+          "KILLED_BLACKOUT": 417,
+          "SURVIVED": 83
+        },
+        "episodes": 500,
+        "mean_return": 2.90862533333322,
+        "mean_steps": 971.152,
+        "standard_error": 0.016639951923007473,
+        "survival": 0.166
+      }
+    },
+    "night4": {
+      "do_nothing": {
+        "camera_duty_cycle": 0.0,
+        "causes": {
+          "KILLED_SPRINTER": 500
+        },
+        "episodes": 500,
+        "mean_return": -8.494600000000002,
+        "mean_steps": 150.54,
+        "standard_error": 0.0,
+        "survival": 0.0
+      },
+      "rhythm": {
+        "camera_duty_cycle": 0.08299094141266108,
+        "causes": {
+          "KILLED_BLACKOUT": 4,
+          "SURVIVED": 496
+        },
+        "episodes": 500,
+        "mean_return": 20.493825399999878,
+        "mean_steps": 1069.924,
+        "standard_error": 0.003983967871356396,
+        "survival": 0.992
+      }
+    },
+    "night5": {
+      "do_nothing": {
+        "camera_duty_cycle": 0.0,
+        "causes": {
+          "KILLED_SPRINTER": 500
+        },
+        "episodes": 500,
+        "mean_return": -8.288800000000004,
+        "mean_steps": 171.12,
+        "standard_error": 0.0,
+        "survival": 0.0
+      },
+      "rhythm": {
+        "camera_duty_cycle": 0.0830406075229598,
+        "causes": {
+          "KILLED_BLACKOUT": 11,
+          "SURVIVED": 489
+        },
+        "episodes": 500,
+        "mean_return": 20.210629866666544,
+        "mean_steps": 1069.26,
+        "standard_error": 0.006559878047646925,
+        "survival": 0.978
+      }
+    },
+    "night6": {
+      "do_nothing": {
+        "camera_duty_cycle": 0.0,
+        "causes": {
+          "KILLED_SPRINTER": 500
+        },
+        "episodes": 500,
+        "mean_return": -9.1022,
+        "mean_steps": 89.78,
+        "standard_error": 0.0,
+        "survival": 0.0
+      },
+      "rhythm": {
+        "camera_duty_cycle": 0.07881912830054234,
+        "causes": {
+          "KILLED_BLACKOUT": 335,
+          "SURVIVED": 165
+        },
+        "episodes": 500,
+        "mean_return": 6.596561133333214,
+        "mean_steps": 1010.44,
+        "standard_error": 0.02102855201862458,
+        "survival": 0.33
+      }
+    }
+  },
+  "runs": {
+    "base": {
+      "config_hash": "7be2fb2d5c680582",
+      "device": {
+        "available": true,
+        "cuda": true,
+        "cuda_device": "NVIDIA GeForce RTX 5060 Laptop GPU"
+      },
+      "directory": "runs/20260727T134603Z-recurrent_ppo-base",
+      "git_sha": "c3d979cb7555825996bc37cb824c01e973d0c8e9",
+      "run_id": "20260727T134603Z-recurrent_ppo-base",
+      "seed": 918442,
+      "stages": [
+        {
+          "beats_reference": false,
+          "camera_duty_cycle": 0.1621604585082964,
+          "causes": {
+            "KILLED_BLACKOUT": 438,
+            "KILLED_PROWLER": 18,
+            "KILLED_SPRINTER": 40,
+            "KILLED_WARDEN": 1,
+            "SURVIVED": 3
+          },
+          "graduated": false,
+          "reference": 0.973,
+          "stage": "stage1-night5",
+          "survival": 0.006,
+          "timesteps": 2002944
+        }
+      ],
+      "wall_clock_s": 4998.7
+    },
+    "oracle": {
+      "config_hash": "0291dd7edac60eb8",
+      "device": {
+        "available": true,
+        "cuda": true,
+        "cuda_device": "NVIDIA GeForce RTX 5060 Laptop GPU"
+      },
+      "directory": "runs/20260727T150003Z-recurrent_ppo-oracle",
+      "git_sha": "b840df3e5b9bc986b2299556ee61752b8ddf6af0-dirty",
+      "run_id": "20260727T150003Z-recurrent_ppo-oracle",
+      "seed": 918442,
+      "stages": [
+        {
+          "beats_reference": false,
+          "camera_duty_cycle": 0.0416016008769662,
+          "causes": {
+            "KILLED_BLACKOUT": 363,
+            "KILLED_PROWLER": 125,
+            "KILLED_WARDEN": 11,
+            "SURVIVED": 1
+          },
+          "graduated": false,
+          "reference": 0.973,
+          "stage": "stage1-night5",
+          "survival": 0.002,
+          "timesteps": 2002944
+        }
+      ],
+      "wall_clock_s": 3972.9
+    },
+    "sparse": {
+      "config_hash": "c63da91993b93550",
+      "device": {
+        "available": true,
+        "cuda": true,
+        "cuda_device": "NVIDIA GeForce RTX 5060 Laptop GPU"
+      },
+      "directory": "runs/20260727T135336Z-recurrent_ppo-sparse",
+      "git_sha": "c3d979cb7555825996bc37cb824c01e973d0c8e9-dirty",
+      "run_id": "20260727T135336Z-recurrent_ppo-sparse",
+      "seed": 918442,
+      "stages": [
+        {
+          "beats_reference": false,
+          "camera_duty_cycle": 0.028802648926084903,
+          "causes": {
+            "KILLED_BLACKOUT": 500
+          },
+          "graduated": false,
+          "reference": 0.973,
+          "stage": "stage1-night5",
+          "survival": 0.0,
+          "timesteps": 2002944
+        }
+      ],
+      "wall_clock_s": 4540.3
+    }
+  },
+  "seed_offset": 1000000,
+  "trained_policy": {
+    "path": "/home/suske/projects/NightGuard/runs/20260727T134603Z-recurrent_ppo-base/stage1-night5/policy.zip",
+    "scores": {
+      "custom_max": {
+        "camera_duty_cycle": 0.19508922891872824,
+        "causes": {
+          "KILLED_BLACKOUT": 306,
+          "KILLED_PROWLER": 27,
+          "KILLED_SPRINTER": 18,
+          "KILLED_WARDEN": 149
+        },
+        "episodes": 500,
+        "mean_return": -4.911322173333338,
+        "mean_steps": 518.778,
+        "standard_error": 0.0,
+        "survival": 0.0
+      },
+      "night4": {
+        "camera_duty_cycle": 0.1818498673119812,
+        "causes": {
+          "KILLED_BLACKOUT": 374,
+          "KILLED_PROWLER": 24,
+          "KILLED_SPRINTER": 31,
+          "KILLED_WARDEN": 1,
+          "SURVIVED": 70
+        },
+        "episodes": 500,
+        "mean_return": 1.7468722999999873,
+        "mean_steps": 906.638,
+        "standard_error": 0.01551773179301666,
+        "survival": 0.14
+      },
+      "night5": {
+        "camera_duty_cycle": 0.1621604585082964,
+        "causes": {
+          "KILLED_BLACKOUT": 438,
+          "KILLED_PROWLER": 18,
+          "KILLED_SPRINTER": 40,
+          "KILLED_WARDEN": 1,
+          "SURVIVED": 3
+        },
+        "episodes": 500,
+        "mean_return": -1.7524014800000098,
+        "mean_steps": 824.936,
+        "standard_error": 0.0034536936748935914,
+        "survival": 0.006
+      },
+      "night6": {
+        "camera_duty_cycle": 0.15896720396572667,
+        "causes": {
+          "KILLED_BLACKOUT": 373,
+          "KILLED_PROWLER": 32,
+          "KILLED_SPRINTER": 95
+        },
+        "episodes": 500,
+        "mean_return": -4.0272168933333425,
+        "mean_steps": 609.22,
+        "standard_error": 0.0,
+        "survival": 0.0
+      }
+    }
+  }
+}

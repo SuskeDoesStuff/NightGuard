@@ -23,6 +23,15 @@ from ..core.config import REPO_ROOT
 RUNS_DIR = REPO_ROOT / "runs"
 
 
+def _git(args: list[str], base: Path) -> str | None:
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=base, capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def git_sha(root: Path | None = None) -> str:
     """The current commit, with ``-dirty`` appended if the tree has uncommitted changes.
 
@@ -30,24 +39,26 @@ def git_sha(root: Path | None = None) -> str:
     reproducible from the SHA alone, and silently recording the clean SHA would claim it was.
     """
     base = REPO_ROOT if root is None else root
-    try:
-        sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=base,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        dirty = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=base,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
+    sha = _git(["rev-parse", "HEAD"], base)
+    dirty = _git(["status", "--porcelain"], base)
+    if sha is None or dirty is None:
         return "unknown"
     return f"{sha}-dirty" if dirty else sha
+
+
+def dirty_paths(root: Path | None = None) -> list[str]:
+    """Which files were uncommitted when the run started.
+
+    ``-dirty`` alone says a run is not reproducible from its SHA; it does not say *how far* from it.
+    v1.1 finished with two of three runs dirty in documentation only, and no way to demonstrate that
+    from the artefact. Listing the paths makes "reproducible apart from the prose" a checkable claim
+    rather than an assurance.
+    """
+    base = REPO_ROOT if root is None else root
+    status = _git(["status", "--porcelain"], base)
+    if not status:
+        return []
+    return sorted(line[3:].strip() for line in status.splitlines() if len(line) > 3)
 
 
 def package_versions() -> dict[str, str]:
@@ -88,6 +99,8 @@ class RunManifest:
             configs together.
         seed: The run seed.
         git_sha: Commit, ``-dirty`` if the tree was modified.
+        dirty_paths: Which files were uncommitted at launch, so "dirty in documentation only" is
+            checkable rather than asserted.
         started_at: UTC ISO timestamp.
         wall_clock_s: Filled in on completion.
         machine: Architecture, OS and Python.
@@ -101,6 +114,7 @@ class RunManifest:
     config_hash: str
     seed: int
     git_sha: str = field(default_factory=git_sha)
+    dirty_paths: list[str] = field(default_factory=dirty_paths)
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     wall_clock_s: float | None = None
     machine: str = field(

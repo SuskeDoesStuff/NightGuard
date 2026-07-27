@@ -10,6 +10,42 @@ progress comes from experiments, runs take real time, and "the curve is flat" ha
 §7's v1.1 criteria were rewritten to match: they ask for **measurements being made and reported**,
 not for particular numbers. A criterion that demands a number invites tuning until it appears.
 
+### Exit criteria: 5 of 8 met
+
+No threshold was moved and no run was tuned until a number appeared. The three misses are reported
+as misses.
+
+| # | Criterion | Outcome |
+|---|---|---|
+| 1 | `gym.make` works for every ID in §2.4 | **Met.** Two IDs registered, three v2.0 IDs correctly absent, tested |
+| 2 | A curve that rises on stage 1, single configuration, before sweeping | **Met.** `mean_steps` 268.7 → 830.9, duty cycle 1.000 → 0.002 |
+| 3 | Beats `do_nothing` on nights 4, 5, 6 outside sampling error at n=500 | **Met on night 4 only** — 0.140 against 0.000, **9.02σ**, transferred from a policy that never saw night 4. Night 5 is 0.0060, 1.74σ, under the 2σ bar. Night 6 is 0.000 |
+| 4 | Beats `rhythm` on night 6 | **Not met, and not attempted.** Stage 1 never graduated, so training night 6 from a policy at 0.006 was not a defensible hour. `rhythm` measures 0.330 on the evaluation seeds |
+| 5 | Oracle gap, non-zero, reported as a lower bound | **Not met.** −0.0040 ± 0.0040, −1.00σ. A floor effect, not a leak — see below |
+| 6 | Camera duty cycle logged, trend reported either way | **Met.** Logged every evaluation across four arms; falls 1.000 → 0.002 |
+| 7 | Every run reproducible from SHA, config hash and seed | **Met, with a caveat.** Every run records all three, and the hash covers CLI overrides. But only **1 of 3** ran from a clean tree; the other two are `-dirty` |
+| 8 | Four §11 gates green; §6, §7, §10 describe the code | **Met** |
+
+`validate.py` now runs **94 checks**, of which the four above fail, each printing its measured value
+against its target.
+
+**Criterion 5's check was itself wrong at first, and that is worth recording.** It passed on any
+non-zero gap, which meant it passed on the negative, statistically-null result actually measured. A
+check that cannot fail for the right reason is worth nothing (§8.0), so it now requires a *positive*
+gap of at least 2σ and fails at −1.00σ. Same trap as v0.3's shadowed validation function, one level
+up: the check ran, printed a number, and said PASS.
+
+**Criterion 7's caveat is real.** `-dirty` says a run is not reproducible from its SHA; it does not
+say how far from it. Two of three runs were dirty in documentation only, and there was no way to
+demonstrate that from the artefact. The manifest now records `dirty_paths`, so the claim is
+checkable rather than asserted. The v1.1 runs predate that and keep the weaker guarantee.
+
+The honest summary of the milestone: **the harness, the measurements and the discipline are sound;
+the policy is not.** Nothing here learned to survive night 5. What the milestone produced instead is
+a characterised account of *why*, plus four findings nobody had on their list — the `sparse_mode`
+discount gradient, the `monitor_down` attractor, the night-4 transfer, and a criterion that cannot
+be answered from the floor.
+
 ### Expectations, recorded before the runs
 
 Written down first, per the evidence discipline in `CLAUDE.md`. There is no analytic derivation to
@@ -33,21 +69,58 @@ advance is the *expectation*, and then reported against whether or not it held.
 
 ### The headline result: the agent rediscovers `monitor_down` and stops there
 
-Stage 1, night 5, 2,000,000 steps, one configuration, evaluated on 500 held-out seeds:
+**Four arms, 2,000,000 steps each on night 5, all evaluated on the same 500 held-out seeds.** None
+of them learned to survive the night.
 
-| Policy | Survival | `mean_steps` | Duty cycle | Dominant cause |
+| Policy | Survival | `mean_steps` | Duty | Dominant cause |
 |---|---|---|---|---|
 | `do_nothing` | 0.000 | 172.2 | 0.000 | SPRINTER, 200/200 |
 | `monitor_down` | 0.000 | 820.4 | 0.000 | **blackout, 200/200** |
-| **learned, dense** | **0.0060** | **824.9** | 0.162 | **blackout, 438/500** |
-| **learned, sparse** | **0.0000** | **723.6** | 0.029 | **blackout, 500/500** |
-| `rhythm` | 0.980 | 1069.3 | 0.083 | survived, 196/200 |
+| learned, **baseline** | **0.0060** | 824.9 | 0.162 | blackout, 438/500 |
+| learned, **oracle** | 0.0020 | 773.6 | 0.042 | blackout 363, **PROWLER 125** |
+| learned, **sparse** | 0.0000 | 723.6 | 0.029 | blackout, 500/500 |
+| learned, **normalised** | 0.0000 | 171.1 | 0.000 | **SPRINTER, 500/500** |
+| `rhythm` | **0.980** | 1069.3 | 0.083 | survived, 196/200 |
 
-The learned policy lands on `monitor_down` almost exactly — 824.9 steps against 820.4, and the same
-failure mode in 88% of episodes. It is power-bound, not entity-bound. Along the way the curve does
-what §7's criterion 2 asks: `mean_steps` rises from 268.7 to a peak of 830.9, and the camera duty
-cycle falls from **1.000 to 0.002** as the agent stops staring at the monitor. Both are real. Neither
+The baseline lands on `monitor_down` almost exactly — 824.9 steps against 820.4, and the same
+power-bound failure in 88% of episodes. Along the way the curve does what §7's criterion 2 asks:
+`mean_steps` rises 268.7 → 830.9 and the duty cycle falls **1.000 → 0.002**. Both are real. Neither
 is survival.
+
+**The policy is not useless — it is power-limited, and night 4 shows it.** Evaluated on nights it
+never trained on, at 500 held-out seeds each:
+
+| Config | `night_divisor` | Learned | `do_nothing` | `rhythm` | Margin over `do_nothing` |
+|---|---|---|---|---|---|
+| Night 4 | 4.0 | **0.140** | 0.000 | 0.994 | **9.02σ** |
+| Night 5 | 3.0 | 0.006 | 0.000 | 0.980 | 1.74σ |
+| Night 6 | 3.0 | 0.000 | 0.000 | 0.330 | — |
+
+That 0.140 is the milestone's one clean pass, and it arrived by transfer: the policy trained on
+night 5 and was never shown night 4. It is also exactly what the diagnosis predicts. §3.10's
+`night_constant = 0.1 / night_divisor` makes night 4 drain less than night 5, and a policy whose
+only failure mode is running out of power converts that headroom straight into survival. The agent
+did not learn to *manage* power; it learned a fixed posture that happens to fit inside night 4's
+budget and not night 5's.
+
+**The one thing that worked, briefly.** The `normalised` arm — `VecNormalize` on returns,
+`target_kl = 0.02`, linear learning-rate annealing, the three orthodox things the baseline lacked —
+reached **survival 0.1200 with a positive mean return (+0.54) and a duty cycle of 0.0702 at 700,000
+steps**. That is the qualitative result the milestone was after: off the plateau, and beating it
+while peeking *less* than `rhythm`'s 0.0793. It did not hold. By 900,000 it was back at 168.6 steps,
+and its 2,000,000-step weights score 0.0000 with 500/500 SPRINTER deaths.
+
+**And that transient was lost, which is a harness defect rather than a result.** The stage saved the
+*final* policy, not the best one seen. On a run this unstable the final weights are an arbitrary
+sample of an oscillation. Fixed: `EvaluationCallback` now checkpoints the best evaluation to
+`best.zip`, ranked on survival with `mean_steps` breaking ties, and `StageResult` records both paths.
+Every figure above predates the fix and none is restated by it.
+
+**`target_kl` did not prevent the collapse.** That was the hypothesis the `normalised` arm existed
+to test, and it is the cleanest negative result here: the arm still fell from 823.1 steps to 168.6
+inside 200,000 steps. So the instability is not simply an unguarded update, and the "the baseline was
+under-configured" explanation is at best partial — normalisation bought the only real survival
+anybody saw, and did not buy stability.
 
 **The plateau has a structure, and it is the environment's, not the optimiser's.** Escaping
 `monitor_down` requires a *sequence* — close the left door, close the right door, raise the monitor
@@ -62,9 +135,22 @@ That is §7's v0.2 criterion 7 arriving from the other side. `monitor_down` was 
 a degenerate strategy, and the answer recorded then was that `rhythm` beats it comfortably. It does.
 But it is still the strategy that gradient ascent on §6.3 finds first, and the one it stays in.
 
-**The run is also unstable.** `mean_steps` swings by ~400 between evaluations 100,000 steps apart,
-and at 1.9M it collapsed to **168.6** — below `do_nothing`'s 172.2 — before recovering to 779 by 2M.
-Updates large enough to destroy their own progress.
+**Every run is unstable, in the same way.** `mean_steps` swings by ~400 between evaluations 100,000
+steps apart, and three of the four arms visited 168.6 — below `do_nothing`'s 172.2 — at some point.
+All four oscillate between the same two attractors: hold the monitor up (~270 steps, duty ≈ 1.0) and
+`monitor_down` (~820 steps, duty ≈ 0.0).
+
+A detail that makes the collapse legible: two independently trained arms with different configs,
+different observation widths and separate processes produced **bit-identical** evaluation statistics
+(543.60 mean steps, duty 0.9625). That is not a bug. *Which* camera is selected has no effect on the
+simulation at all — only `monitor_up` gates office entry (§3.4, §3.5) and drains power (§3.10) — so
+any two policies that collapse to "hold the monitor up" trace identical trajectories on identical
+seeds. It is a clean signature of the attractor.
+
+The `tuned` arm — `gae_lambda` 0.95 → 0.995 to match the advantage window to the mechanic's
+timescale, `ent_coef` 0.01 → 0.02, `lr` 3e-4 → 2e-4, changed together and therefore not separably
+attributable — damped none of it, and was stopped at 1,000,000 steps once it was oscillating 309 ↔
+670 with survival 0.0000 throughout. Its curve is kept as a recorded failed attempt.
 
 ### Criterion 5 is not answerable at floor performance
 

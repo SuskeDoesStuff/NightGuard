@@ -1217,6 +1217,21 @@ measurements existed; see §10 and `CHANGELOG.md`.
 7. Every run reproducible from a recorded git SHA, config hash and seed.
 8. All four §11 gates green, and §6, §7 and §10 describe what the code does.
 
+**Outcome: 5 of 8 met.** Criteria 3 (partially), 4 and 5 are recorded as misses in `CHANGELOG.md`
+and `docs/V1.1-DISCREPANCY-RESOLUTION.md`. Four 2,000,000-step arms on night 5 all converged on the
+`monitor_down` degenerate strategy; the one clean pass was **0.140 survival on night 4** by transfer,
+against `do_nothing`'s 0.000 at 9.02σ. No threshold was moved.
+
+Two things a later version must not re-derive from scratch:
+
+- **Criterion 5 presupposes a base arm that has learned something.** Measured at −0.0040 ± 0.0040,
+  the Oracle gap is a floor effect, not a leak: v1.0's probe and `validate.py`'s four no-leak checks
+  all still pass. Do not trigger the stop condition on a null gap between two arms that both score
+  near zero.
+- **§6.3 gives no gradient toward the peek loop.** Escaping `monitor_down` needs *close both doors →
+  raise monitor → drop → reopen*, and every prefix is strictly worse than not starting. Whether that
+  difficulty is intended or accidental is a fair question for v2.0; §6.3 is normative until then.
+
 ### v1.2 — Policy visualiser
 
 See section 9.

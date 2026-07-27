@@ -10,8 +10,18 @@ information and one of its costliest actions.
 ## Status
 
 **v1.1 — Baseline policy.** `RecurrentPPO` with an LSTM over the v1.0 environment, a three-stage
-curriculum set by measured headroom, and the measurements that make partial observability a number:
-the Oracle gap, survival against the `rhythm` reference, and camera duty cycle across training.
+curriculum set by measured headroom, and the measurements that make partial observability a number.
+
+**The harness works; the policy does not yet.** Four 2M-step arms on night 5 all converge on the
+`monitor_down` degenerate strategy — 824.9 mean steps against the scripted policy's 820.4, dying to
+a blackout in 88% of episodes. Five of §7's eight v1.1 exit criteria are met and three are reported
+as misses. The one clean pass came by transfer: **0.140 survival on night 4**, a night the policy
+never trained on, against `do_nothing`'s 0.000. `rhythm` still holds the field at 0.980 on night 5.
+
+Escaping the plateau needs a sequence — close both doors, raise the monitor to freeze SPRINTER, drop
+it, reopen — and every prefix of it is worse than not starting, so §6.3's reward gives the optimiser
+no gradient toward it. `CHANGELOG.md` has the full account, including a `sparse_mode` result that
+contradicted its own pre-registered expectation.
 
 ## Install
 
