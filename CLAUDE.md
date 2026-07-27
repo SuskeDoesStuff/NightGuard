@@ -33,7 +33,7 @@ All four must pass before any milestone is called done. See PROJECT.md §11.
 | v0.2 | WARDEN + SPRINTER, trace format, audio, reference policies | **Done** — tag `v0.2` |
 | v0.3 | Three-phase blackout, validation suite (§8), minimal viewer | **Done** — tag `v0.3` |
 | v1.0 | Gymnasium wrapper, observation, reward, wrappers | **Done** — tag `v1.0` |
-| v1.1 | RecurrentPPO baseline | **Current** |
+| v1.1 | RecurrentPPO baseline, curriculum, Oracle gap | **Current** |
 | v1.2 | Replay viewer | Not started |
 | v2.0 | Randomised configs, benchmark table | Not started |
 | v2.1 | Packaging and release | Not started |
@@ -97,6 +97,19 @@ PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning.
 - **A success during an in-flight WARDEN countdown is ignored**, not a restart.
 - **Trace shape is 1.1.** `jams` and `blackout` were added for the viewer; no further extension
   before v1.2.
+- **The curriculum is night 5 → night 6 → `custom_max`.** Set by measured headroom, not intuition.
+  `rhythm` scores 1.000/1.000/1.000/0.993/0.973/0.325 on nights 1-6, so nights 1-4 are sanity checks
+  and **night 6 is the only shipped night with room above the reference**. Replaced §10's v0.1-era
+  "start at night 3" row, whose stated reason was also wrong: `do_nothing` on night 1 measures 0.287,
+  not "most of the time".
+- **Camera duty cycle is the `monitor_up` fraction**, and `rhythm`'s is **0.0793**, not its design
+  figure of 1/12. For `rhythm` the monitor-up and camera-action fractions coincide exactly, so either
+  definition looks right; they come apart for a policy that holds the monitor up.
+- **`env/vector.py` stays unbuilt, and that is now a measurement.** The environment is **0.7% of
+  training wall clock**; the PPO update is 40× the rollout. If it is ever built, the
+  object-versus-vectorised equivalence test is a hard gate.
+- **Training hyperparameters were fixed from a throughput measurement taken before any run.** SB3's
+  per-minibatch LSTM padding dominates: 8 minibatches run 191 steps/s, 2 run 750. Not a sweep.
 
 ## Traps
 
@@ -131,3 +144,14 @@ PROJECT.md §10 is the register; `CHANGELOG.md` carries the reasoning.
   boundary convention moves it to 0.6367, which is 4.5σ at n=10,000 and looks like a blackout bug.
 - **Survival tests are behind the `slow` marker.** `pytest` alone does not run them; use
   `scripts/validate.py` before claiming a milestone.
+- **A criterion satisfied by a path that never touches the declaration is not satisfied.** v1.0's
+  criterion 1 passed `check_env` on a directly-constructed `NightGuardEnv` for a whole milestone
+  while `gym.make("NightGuard-v0")` raised `NameNotFound`, because nothing ever called `register()`.
+- **`reset()` must spawn from `self.np_random`, never from a second generator.** Gymnasium seeds
+  `self.np_random` bit-identically to `default_rng(seed)`, so building another one made the first
+  unseeded reset replay the seeded episode — once per SB3 training run, silently. The regression
+  guard is in `validate.py` and `test_env_api.py`; it needs the non-vacuity check that the outcomes
+  actually differ.
+- **`rhythm` measures power economics above night 6, not difficulty.** It floors at exactly 0.185
+  for 8/15/16/20 through 20/20/20/20, with **zero entity deaths**, because it never lets anything in
+  and only ever dies to a blackout. Do not calibrate a custom night against its score.

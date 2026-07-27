@@ -1,5 +1,170 @@
 # Changelog
 
+## v1.1 — Baseline policy
+
+The first learned policy: `RecurrentPPO` with an LSTM, a three-stage curriculum, and the
+measurements that turn partial observability into a number.
+
+This milestone changed character. Up to v1.0 every question had a verifiable right answer; from here
+progress comes from experiments, runs take real time, and "the curve is flat" has a dozen causes.
+§7's v1.1 criteria were rewritten to match: they ask for **measurements being made and reported**,
+not for particular numbers. A criterion that demands a number invites tuning until it appears.
+
+### Expectations, recorded before the runs
+
+Written down first, per the evidence discipline in `CLAUDE.md`. There is no analytic derivation to
+compare against here — an RL curve is not derivable from §3 — so what can honestly be fixed in
+advance is the *expectation*, and then reported against whether or not it held.
+
+1. **Stage 1 will learn from the dense term, not from reaching dawn.** On night 5 `do_nothing`
+   scores 0.000 and `monitor_down` 0.007, so a random policy essentially never sees the `+10`. The
+   gradient comes from `+0.01` per step survived, and `mean_steps` should move before `survival`
+   does.
+2. **`sparse_mode` on stage 1 will produce no learning signal at all**, for the same reason with the
+   dense term removed. Run it as a final ablation and report the flat curve; it is not a bug.
+3. **The Oracle gap is a lower bound, and the config it is measured on matters.** §6.4 already
+   records why it is a lower bound. Measuring it on a config where both arms saturate — night 5,
+   where `rhythm` alone reaches 0.973 — or where both arms floor would manufacture a spurious zero,
+   and criterion 5 reads a zero as evidence of a leak. The matched pair therefore runs on the
+   hardest config where the base agent demonstrably learns, chosen from the stage results.
+4. **Camera duty cycle may go either way,** and §7's criterion was rewritten to say so. The
+   interesting result is beating `rhythm` while peeking *less*; beating it by peeking more is a
+   different and duller strategy, and both are reportable.
+
+### The curriculum, and what the measurements say
+
+Measured at 400 seeds per night, `rhythm` frozen at `peek_every_steps=12`:
+
+| Night | `rhythm` | `do_nothing` | `monitor_down` | Headroom above `rhythm` |
+|---|---|---|---|---|
+| 1 | 1.000 | 0.287 | 1.000 | 0.000 |
+| 2 | 1.000 | 0.010 | 0.990 | 0.000 |
+| 3 | **1.000** | 0.000 | 0.840 | **0.000** |
+| 4 | 0.993 | 0.000 | 0.003 | 0.007 |
+| 5 | 0.973 | 0.000 | 0.007 | 0.027 |
+| 6 | 0.325 | 0.000 | 0.000 | 0.675 |
+
+§10's curriculum row said *"start at night 3; night 1 is near-degenerate"*. Night 3 measures
+**1.000** — the locked curriculum start was a night where a fixed script never dies. The row's
+stated reason was also wrong on its own terms: it claimed `do_nothing` survives night 1 "most of the
+time", which predates SPRINTER and measures **0.287** at 400 seeds, against §8.2's analytic 0.2397.
+Night 1 is degenerate because `rhythm` and `monitor_down` both score 1.000, not for the reason
+recorded. Both §10 and §7's v1.1 preamble carried it; both are replaced.
+
+Nights 1-4 are not curriculum stages. A random policy has room to improve on them, but `rhythm`
+already scores 1.000, 1.000, 1.000 and 0.993, so an agent that graduates has learned nothing a fixed
+script did not already do. They stay as sanity checks. **Night 6 is the only shipped night with
+meaningful room above the reference.**
+
+### Difficulty saturates, and not for the reason you would expect
+
+Measured at 200 seeds, night-6 escalation, varying only the starting AI levels:
+
+| Starting levels (W/D/P/S) | `rhythm` | Causes |
+|---|---|---|
+| 4/10/12/16 (night 6) | 0.345 | 131 blackout, 69 survived |
+| 4/13/14/18 | 0.235 | 153 blackout, 47 survived |
+| 6/14/15/19 | 0.215 | 157 blackout, 43 survived |
+| 8/15/16/20 | **0.185** | 163 blackout, 37 survived |
+| 10/16/17/20 | **0.185** | 163 blackout, 37 survived |
+| 14/18/18/20 | **0.185** | 163 blackout, 37 survived |
+| **20/20/20/20** | **0.185** | 163 blackout, 37 survived |
+
+A hard floor at 0.185, identical across four very different configurations, with **zero entity
+deaths at every level**. `rhythm` closes both doors before every peek, so nothing ever gets in; its
+only failure mode is running out of power under SPRINTER's escalating bang drain. Once SPRINTER
+saturates at `ai.level_max`, raising the other three changes nothing at all.
+
+Three consequences, and the first is the trap:
+
+1. **`rhythm` is a power-economy probe above night 6, not a difficulty probe.** Calibrating a custom
+   night against its score and concluding the night is easy would be exactly backwards.
+2. **This is §3.10's designed tension working**, not a defect. A door-discipline policy is
+   power-bound by construction. Recorded as a §10 row rather than filed as a bug.
+3. **It is the most interesting regime for a learned policy.** `rhythm`'s fixed cadence provably
+   wastes power — it peeks on a timer regardless of what it knows — so adaptive peek timing has
+   somewhere to go.
+
+The three stages replace §10's row: night 5 (reference 0.973, graduate at 0.90), night 6 (0.325,
+graduate at 0.40), and `custom_max` at 20/20/20/20 (0.185, report only).
+
+### Where the training wall clock goes
+
+`scripts/profile_training.py` times `learn()` end to end and then the same number of environment
+steps alone. Measured on a real `RecurrentPPO` rollout, night 5, x86_64 Linux, Python 3.14.4:
+
+| Device | Training | Environment only | Environment share |
+|---|---|---|---|
+| CPU | 251 steps/s | 28,843 steps/s | **0.87%** |
+| CUDA | 169 steps/s | 30,771 steps/s | 0.55% |
+
+Two findings.
+
+**The environment is 0.7% of a training run**, so `env/vector.py` stays unbuilt — now on a
+measurement rather than an argument. §5 of `docs/V1.0-DISCREPANCY-RESOLUTION.md` deferred it on
+exactly this claim and asked for it to be checked; it holds with room to spare. Taking the
+environment to zero would buy under one percent. §6.5 updated to say so, with the equivalence-test
+gate retained for whenever it is built.
+
+**The GPU is slower than the CPU**, by a third. At `n_envs=16` and 100 input dims the LSTM is
+launch-bound: the kernels are too small to amortise the dispatch. Recorded rather than assumed —
+the runs use CPU.
+
+What actually dominates is the PPO update, at **40× the rollout collection**, and it is driven by
+SB3's fixed per-minibatch cost to pad and unroll LSTM sequences rather than by anything here:
+
+| Shape | Minibatches/epoch | Steps/s | 2M steps |
+|---|---|---|---|
+| `n_envs=8, n_steps=256, batch=256` | 8 | 191 | 2 h 54 m |
+| `n_envs=8, n_steps=256, batch=2048` | 1 | 709 | 47 m |
+| `n_envs=16, n_steps=256, batch=2048` | 2 | **750** | **44 m** |
+
+`configs/train/baseline.yaml` takes the last row. **This was chosen from a throughput measurement
+taken before any training run, not by a sweep against results** — the prompt's ban is on tuning to
+chase a number, and a configuration that cannot finish is not a configuration.
+
+### v1.0 follow-ups
+
+- **The environment was never registered with Gymnasium.** §2.4 declared `NightGuard-v0` from v0.1
+  onwards, but nothing anywhere called `register()`, so `gym.make("NightGuard-v0")` raised
+  `NameNotFound`. v1.0's criterion 1 passed because it constructed `NightGuardEnv` directly — a
+  legitimate path that never touches the declaration, which is exactly how the gap survived a
+  review. Two IDs now ship: `NightGuard-v0` with a `night` kwarg, and `NightGuard-CustomMax-v0`.
+  The three IDs §2.4 schedules for v2.0 stay unregistered and a test asserts it, because an ID that
+  silently resolves to something else is worse than a missing one. No `max_episode_steps`: the night
+  is a fixed horizon the simulator ends itself, and a `TimeLimit` would report termination as
+  truncation.
+- **`custom_template.yaml` was a schema document, not a loadable preset.** `load_night_config` took
+  an `int` in `[1, 6]` and had no by-name path. Added `load_preset(name)`, and
+  `configs/nights/custom_max.yaml` for stage 3.
+
+### Found during execution: the first unseeded reset replayed the seeded episode
+
+Not in the prompt, and it lands squarely on training. `NightGuardEnv.reset` built its own
+`np.random.default_rng(seed)` on the seeded path but used `self.np_random` on the unseeded one.
+Gymnasium seeds `self.np_random` from `SeedSequence(seed)`, which is **bit-identical** to
+`default_rng(seed)` — same bit-generator state, same spawned children, verified directly — so the
+first unseeded reset spawned substreams 0..5 for a second time and replayed the seeded episode
+verbatim. Measured on night 6 under all-`NOOP`, episodes 1 and 2 were both
+`(102 ticks, KILLED_SPRINTER, 92.253)`; episodes 3 and 4 diverged.
+
+SB3 seeds once and then resets without a seed for the remainder of a run, so **every training run
+and every naive 500-episode evaluation silently duplicated its first episode.** The fix is to always
+spawn from `self.np_random`, which is exactly equivalent on the seeded path — `reset(seed=k)` still
+matches `NightSim.from_seed(k)` seed-for-seed and no existing fixture moves. `validate.py` still
+passes 81 of 81 with it in, and now carries the regression guard.
+
+### `rhythm`'s camera duty cycle is 0.0793, not 1/12
+
+Its design figure is one peek every 12 decision steps, 0.0833. The peek cycle spends extra steps
+closing both doors before the peek, which stretches the period past 12, and the measured
+monitor-up fraction is **0.0793** on night 6. That is the bar criterion 6 compares against.
+
+The definition also had to be pinned. For `rhythm` the monitor-up fraction and the
+camera-action fraction coincide exactly, so either would have looked right; they come apart for any
+policy that holds the monitor up across steps. §10 fixes it as the **monitor-up fraction**, because
+that is the quantity that both drains power (§3.10) and opens the office (§3.4, §3.5).
+
 ## v1.0 — Environment
 
 A Gymnasium interface over the validated simulator. All seven exit criteria met; `validate.py` now

@@ -10,6 +10,7 @@ passes by a factor of ten should be visible, not silently green.
 from __future__ import annotations
 
 import hashlib
+import json
 import platform
 import sys
 import tempfile
@@ -20,7 +21,9 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+import gymnasium as gym
 import numpy as np
+from gymnasium.error import NameNotFound
 from gymnasium.utils.env_checker import check_env
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -39,7 +42,7 @@ from nightguard.core import (
 from nightguard.core.blackout import apply_onset
 from nightguard.core.power import idle_drain_per_second
 from nightguard.core.state import action_for_camera
-from nightguard.env import NightGuardEnv
+from nightguard.env import DEFERRED_IDS, REGISTERED_IDS, NightGuardEnv
 from nightguard.env import obs as obs_mod
 from nightguard.env.actions import ACTION_COUNT
 from nightguard.policies import DoNothing, MonitorDown, Rhythm, run_policy
@@ -809,6 +812,182 @@ def check_throughput() -> list[Check]:
     ]
 
 
+# --- v1.1: registration, the reset stream, and the recorded training results --------------------
+
+
+def check_registration() -> list[Check]:
+    """v1.1 criterion 1: every ID PROJECT.md 2.4 declares resolves, and no more."""
+    checks = []
+    for env_id in REGISTERED_IDS:
+        made = gym.make(env_id)
+        observation, _ = made.reset(seed=3)
+        made.close()
+        checks.append(
+            Check(
+                "v1.1-1 gym.make",
+                f"{env_id} constructs and resets, observation {observation.shape}",
+                made.observation_space.contains(observation),
+            )
+        )
+    unresolved = []
+    for env_id in DEFERRED_IDS:
+        try:
+            gym.make(env_id).close()
+        except NameNotFound:
+            unresolved.append(env_id)
+    checks.append(
+        Check(
+            "v1.1-1 deferred",
+            f"{len(unresolved)} of {len(DEFERRED_IDS)} v2.0 IDs correctly unregistered",
+            len(unresolved) == len(DEFERRED_IDS),
+        )
+    )
+    return checks
+
+
+def check_reset_stream() -> list[Check]:
+    """Consecutive unseeded resets must draw fresh substreams.
+
+    Not one of the numbered criteria: it is the regression guard for the defect found during Part 0,
+    where the first unseeded reset after a seeded one replayed the seeded episode. Under SB3 that is
+    once per training run and once per naive evaluation sweep, silently.
+    """
+    env = NightGuardEnv(night=6, topology=TOPOLOGY)
+
+    def play_out() -> tuple[int, str, float]:
+        while not env.sim.state.terminated:
+            env.step(int(Action.NOOP))
+        state = env.sim.state
+        return (state.tick, state.cause.value, round(state.power_pct, 6))
+
+    env.reset(seed=7)
+    outcomes = [play_out()]
+    for _ in range(5):
+        env.reset()
+        outcomes.append(play_out())
+
+    matched = _sim(load_night_config(6), 7)
+    matched.run([Action.NOOP])
+    agrees = outcomes[0] == (
+        matched.state.tick,
+        matched.state.cause.value,
+        round(matched.state.power_pct, 6),
+    )
+    return [
+        Check(
+            "v1.1-0 reset stream",
+            f"{len(set(outcomes))} distinct outcomes across 6 consecutive resets",
+            outcomes[0] != outcomes[1] and len(set(outcomes)) > 1,
+        ),
+        Check(
+            "v1.1-0 seeded reset",
+            "reset(seed=7) still reproduces NightSim.from_seed(7) exactly",
+            agrees,
+        ),
+    ]
+
+
+def _load_run_summary() -> dict[str, Any] | None:
+    path = Path(__file__).resolve().parents[1] / "runs" / "summary.json"
+    if not path.is_file():
+        return None
+    with path.open(encoding="utf-8") as handle:
+        loaded: dict[str, Any] = json.load(handle)
+    return loaded
+
+
+def check_training_results() -> list[Check]:
+    """v1.1 criteria 2-7, read from the committed ``runs/summary.json``.
+
+    These cannot be recomputed here — each one costs hours of training — so they are checked against
+    the recorded artefact instead. A missing summary **fails**: the point is that the milestone
+    cannot be called done on a repository where the runs were never made.
+    """
+    summary = _load_run_summary()
+    if summary is None:
+        return [
+            Check(
+                "v1.1-2..7 results",
+                "runs/summary.json is absent: no training run has been recorded",
+                False,
+            )
+        ]
+
+    checks: list[Check] = []
+    criteria = summary.get("criteria", {})
+
+    curve = criteria.get("learning_curve", {})
+    checks.append(
+        Check(
+            "v1.1-2 curve",
+            f"{curve.get('stage')}: mean_steps {curve.get('first_mean_steps')} -> "
+            f"{curve.get('best_mean_steps')}, survival {curve.get('first_survival')} -> "
+            f"{curve.get('best_survival')}",
+            bool(curve.get("rises")),
+        )
+    )
+
+    for night, entry in sorted(criteria.get("beats_do_nothing", {}).items()):
+        margin = entry.get("margin_sigma", 0.0)
+        checks.append(
+            Check(
+                "v1.1-3 vs do_nothing",
+                f"{night}: policy {entry.get('policy')} vs do_nothing {entry.get('do_nothing')} "
+                f"({margin} sigma at n={entry.get('episodes')})",
+                bool(entry.get("passed")),
+            )
+        )
+
+    rhythm = criteria.get("beats_rhythm_night6", {})
+    checks.append(
+        Check(
+            "v1.1-4 vs rhythm",
+            f"night 6: policy {rhythm.get('policy')} vs rhythm {rhythm.get('rhythm')} "
+            f"({rhythm.get('margin_sigma')} sigma at n={rhythm.get('episodes')})",
+            bool(rhythm.get("passed")),
+        )
+    )
+
+    gap = criteria.get("oracle_gap", {})
+    checks.append(
+        Check(
+            "v1.1-5 oracle gap",
+            f"{gap.get('config')}: oracle {gap.get('oracle')} - base {gap.get('base')} = "
+            f"{gap.get('gap')} (a lower bound, PROJECT.md 6.4)",
+            gap.get("gap") is not None and gap.get("gap") != 0.0,
+        )
+    )
+
+    duty = criteria.get("camera_duty_cycle", {})
+    checks.append(
+        Check(
+            "v1.1-6 duty cycle",
+            f"logged over {duty.get('points')} evaluations: {duty.get('first')} -> "
+            f"{duty.get('last')} against rhythm's {duty.get('reference')} ({duty.get('trend')})",
+            bool(duty.get("logged")),
+        )
+    )
+
+    runs = summary.get("runs", {})
+    complete = [
+        name
+        for name, run in runs.items()
+        if run.get("git_sha") and run.get("config_hash") and run.get("seed") is not None
+    ]
+    clean = [
+        name for name, run in runs.items() if not str(run.get("git_sha", "")).endswith("dirty")
+    ]
+    checks.append(
+        Check(
+            "v1.1-7 reproducible",
+            f"{len(complete)} of {len(runs)} runs record SHA, config hash and seed; "
+            f"{len(clean)} from a clean tree",
+            len(runs) > 0 and len(complete) == len(runs),
+        )
+    )
+    return checks
+
+
 def main() -> int:
     """Run every check and print a table."""
     checks: list[Check] = []
@@ -833,6 +1012,9 @@ def main() -> int:
         check_no_position_leak,
         check_reset_determinism,
         check_throughput,
+        check_registration,
+        check_reset_stream,
+        check_training_results,
     ):
         checks += step()
 
