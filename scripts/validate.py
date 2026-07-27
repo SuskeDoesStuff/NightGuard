@@ -948,13 +948,18 @@ def check_training_results() -> list[Check]:
         )
     )
 
+    # Both measures are reported. Where the base arm is pinned at zero survival, survival alone
+    # cannot show a gap that mean_steps can, and a zero read off a floor effect would trip this
+    # criterion's stop condition for a reason that has nothing to do with a leak.
     gap = criteria.get("oracle_gap", {})
+    survival_gap, steps_gap = gap.get("gap"), gap.get("mean_steps_gap")
     checks.append(
         Check(
             "v1.1-5 oracle gap",
-            f"{gap.get('config')}: oracle {gap.get('oracle')} - base {gap.get('base')} = "
-            f"{gap.get('gap')} (a lower bound, PROJECT.md 6.4)",
-            gap.get("gap") is not None and gap.get("gap") != 0.0,
+            f"{gap.get('config')}: survival {gap.get('oracle')} - {gap.get('base')} = "
+            f"{survival_gap}; mean_steps {gap.get('oracle_mean_steps')} - "
+            f"{gap.get('base_mean_steps')} = {steps_gap} (a lower bound, PROJECT.md 6.4)",
+            bool(survival_gap) or bool(steps_gap),
         )
     )
 

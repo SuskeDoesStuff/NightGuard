@@ -31,6 +31,71 @@ advance is the *expectation*, and then reported against whether or not it held.
    interesting result is beating `rhythm` while peeking *less*; beating it by peeking more is a
    different and duller strategy, and both are reportable.
 
+### The headline result: the agent rediscovers `monitor_down` and stops there
+
+Stage 1, night 5, 2,000,000 steps, one configuration, evaluated on 500 held-out seeds:
+
+| Policy | Survival | `mean_steps` | Duty cycle | Dominant cause |
+|---|---|---|---|---|
+| `do_nothing` | 0.000 | 172.2 | 0.000 | SPRINTER, 200/200 |
+| `monitor_down` | 0.000 | 820.4 | 0.000 | **blackout, 200/200** |
+| **learned, dense** | **0.0060** | **824.9** | 0.162 | **blackout, 438/500** |
+| **learned, sparse** | **0.0000** | **723.6** | 0.029 | **blackout, 500/500** |
+| `rhythm` | 0.980 | 1069.3 | 0.083 | survived, 196/200 |
+
+The learned policy lands on `monitor_down` almost exactly — 824.9 steps against 820.4, and the same
+failure mode in 88% of episodes. It is power-bound, not entity-bound. Along the way the curve does
+what §7's criterion 2 asks: `mean_steps` rises from 268.7 to a peak of 830.9, and the camera duty
+cycle falls from **1.000 to 0.002** as the agent stops staring at the monitor. Both are real. Neither
+is survival.
+
+**The plateau has a structure, and it is the environment's, not the optimiser's.** Escaping
+`monitor_down` requires a *sequence* — close the left door, close the right door, raise the monitor
+to freeze SPRINTER, drop it, reopen — and **every prefix of that sequence is strictly worse than not
+starting it**. Raising the monitor with a door open is precisely what lets an entity into the office
+(§3.4, §3.5), and closing doors without peeking just spends power. §6.3's power term charges for the
+first step immediately, while the payoff — SPRINTER frozen, no escalating `1 + 5n` bang, power still
+in hand at 5AM — arrives hundreds of steps later. The gradient points away from the peek loop from
+every direction.
+
+That is §7's v0.2 criterion 7 arriving from the other side. `monitor_down` was built as a probe for
+a degenerate strategy, and the answer recorded then was that `rhythm` beats it comfortably. It does.
+But it is still the strategy that gradient ascent on §6.3 finds first, and the one it stays in.
+
+**The run is also unstable.** `mean_steps` swings by ~400 between evaluations 100,000 steps apart,
+and at 1.9M it collapsed to **168.6** — below `do_nothing`'s 172.2 — before recovering to 779 by 2M.
+Updates large enough to destroy their own progress.
+
+### Expectation 2 was wrong: `sparse_mode` is not gradient-free
+
+Reported rather than corrected, per the rule. The expectation above — and the prompt's — was that
+stage 1 under `sparse_mode` would produce **no learning signal at all**, on the reasoning that a
+random policy never reaches dawn and the only remaining term is the death penalty. It measures
+otherwise: the sparse arm went from `mean_steps` 268.74 to **684.44 by 200,000 steps**, ahead of the
+dense arm at the same point, and finished at **723.6** — the same `monitor_down` plateau the dense
+arm found, reached with every dense term switched off.
+
+The reasoning missed the discount. PPO optimises the *discounted* return, and a terminal penalty
+arriving at step `t` is worth `-10 · γ^t` at the start of the episode — which is monotonically
+**increasing** in `t`. At `γ = 0.999`:
+
+| Dies at step | Discounted return |
+|---|---|
+| 268.74 | −7.642 |
+| 485.50 | −6.152 |
+| 684.44 | −5.042 |
+| 1070 (dawn, `+10`) | +3.428 |
+
+So the observed improvement is worth **+2.6 of discounted return**, on a run whose *undiscounted*
+mean return stayed pinned at −10.00 to −10.05 — which is exactly what the summary reports, and
+exactly why it looks flat. Discounting converts *when* the penalty lands into *how much* it costs,
+and delaying death is therefore rewarded even with every dense term switched off.
+
+The claim that survives is narrower and still worth making: `sparse_mode` removes the *shaped*
+signal, so what is left is a much weaker and more delayed one that depends on the discount factor
+rather than on §6.3. A `γ` close enough to 1 would genuinely flatten it. §7's v1.1 preamble is
+worded to say that, rather than repeating the stronger claim.
+
 ### The curriculum, and what the measurements say
 
 Measured at 400 seeds per night, `rhythm` frozen at `peek_every_steps=12`:

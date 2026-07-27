@@ -1185,9 +1185,16 @@ agent that graduates from one has learned nothing a fixed script did not already
 
 Stage 1 depends entirely on §6.3's dense survival term. On night 5 `do_nothing` scores 0.000 and
 `monitor_down` 0.007, so a random policy essentially never reaches dawn and the terminal reward is
-never observed; what produces a gradient is the `+0.01` per step survived. **Under `sparse_mode`
-there is no such term and stage 1 is expected to produce no learning signal at all.** Train dense,
-run sparse as a final ablation, and report the flat curve rather than treating it as a bug.
+never observed; what produces a gradient is the `+0.01` per step survived. Train dense and run
+`sparse_mode` as a final ablation.
+
+**`sparse_mode` is not gradient-free, though**, and v1.1 measured that the other way round from how
+it was expected. A terminal penalty arriving at step `t` is worth `-10 · γ^t` at the start of the
+episode, which *increases* with `t`, so delaying death raises the discounted objective even with
+every dense term switched off — worth +2.6 of return between dying at step 269 and dying at 684, at
+`γ = 0.999`. The undiscounted mean return stays pinned at −10 throughout, which is what makes the
+curve look flat. What `sparse_mode` removes is the *shaped* signal; what remains is weaker, more
+delayed, and a function of the discount factor rather than of §6.3. See `CHANGELOG.md`.
 
 **Exit criteria.** These are about *measurements being made and reported*, not about hitting
 particular numbers. The numbers are not knowable in advance, and a criterion that demands one invites

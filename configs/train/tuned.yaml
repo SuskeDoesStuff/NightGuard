@@ -1,0 +1,81 @@
+# A second configuration, aimed at one diagnosed failure. PROJECT.md 7 (v1.1).
+#
+# The baseline curriculum climbs to a plateau and stops: on night 5 it reaches mean_steps ~830 with
+# a camera duty cycle of ~0.002, which is `monitor_down` rediscovered -- the scripted `monitor_down`
+# policy measures 820.4 steps and dies to a blackout in 200 of 200 episodes. Survival stays at
+# 0.000. See CHANGELOG, v1.1.
+#
+# That plateau is a local optimum with a real structure behind it. Escaping it needs a *sequence* --
+# close the left door, close the right door, raise the monitor to freeze SPRINTER, drop it, reopen --
+# and every prefix of that sequence is strictly worse than not starting: raising the monitor with a
+# door open lets an entity in (3.4, 3.5), and closing doors without peeking just spends power. So
+# the gradient points away from the peek loop from every direction, and 6.3's power term punishes
+# the first step of it immediately while the payoff arrives hundreds of steps later.
+#
+# Three changes, made together. **The attribution is therefore not separable** -- this is one attempt
+# at a diagnosed problem, not a sweep, and it is reported as such.
+#
+#   gae_lambda    0.95 -> 0.995   The advantage estimator's effective window is 1/(1 - gamma*lambda):
+#                                 19.6 steps at 0.95, 167 at 0.995. The mechanic being learned spans
+#                                 hundreds of steps -- peek, freeze SPRINTER, avoid an escalating
+#                                 1 + 5n bang, still have power at 5AM -- so at 0.95 the advantage
+#                                 signal cannot reach across it and the critic has to carry all of
+#                                 it alone. Chosen from the timescale of the mechanic, not by search.
+#   ent_coef      0.01 -> 0.02    The collapse is to a *deterministic* policy; the duty cycle goes to
+#                                 0.002 and stays. Entropy is what keeps the peek sequence reachable.
+#   learning_rate 3e-4 -> 2e-4    mean_steps swings by ~400 between consecutive evaluations 100k
+#                                 steps apart, which is the signature of updates large enough to
+#                                 destroy their own progress. It does destroy them: the baseline
+#                                 peaks at 830.86 steps by 900k and has collapsed to 168.60 by 1.9M,
+#                                 which is `do_nothing` (172.2) -- below even the plateau it found.
+#
+# Everything else is the baseline, including the seed, so the arms are otherwise matched.
+
+algorithm: recurrent_ppo
+seed: 918442
+oracle: false
+sparse: false
+
+policy:
+  lstm_hidden_size: 128
+  n_lstm_layers: 1
+  net_arch: [128, 128]
+  shared_lstm: false
+  enable_critic_lstm: true
+
+algo:
+  n_envs: 16
+  n_steps: 256
+  batch_size: 2048
+  n_epochs: 10
+  learning_rate: 0.0002
+  gamma: 0.999
+  gae_lambda: 0.995
+  clip_range: 0.2
+  ent_coef: 0.02
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  device: auto
+
+eval:
+  episodes: 500
+  every_steps: 100000
+  curve_episodes: 50
+  seed_offset: 1000000
+
+stages:
+  - name: stage1-night5
+    night: 5
+    total_steps: 2000000
+    graduation: 0.90
+    reference: 0.973
+  - name: stage2-night6
+    night: 6
+    total_steps: 2000000
+    graduation: 0.40
+    reference: 0.325
+  - name: stage3-custom-max
+    preset: custom_max
+    total_steps: 1000000
+    graduation: null
+    reference: 0.185

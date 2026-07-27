@@ -158,6 +158,50 @@ def duty_cycle_criterion(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def find_stage(run: dict[str, Any], name: str) -> dict[str, Any] | None:
+    """One stage of a run, by name."""
+    for stage in run["stages"]:
+        if stage["stage"] == name:
+            return stage
+    return None
+
+
+def oracle_gap_criterion(present: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Criterion 5: the matched Oracle pair.
+
+    Matched **by stage name**, not by position. The Oracle arm trains one stage; the baseline's
+    stage of the same name is its matched partner -- identical config, seed, architecture and step
+    budget, differing only in the wrapper. Comparing against the baseline's *last* stage would be
+    comparing across nights.
+
+    Both survival and ``mean_steps`` are reported. On a config where the base arm is pinned at zero
+    survival, survival alone cannot show a gap that ``mean_steps`` can, and a gap reported as zero
+    for a floor effect would trip criterion 5's stop condition for the wrong reason.
+    """
+    empty: dict[str, Any] = {"config": None, "base": None, "oracle": None, "gap": None}
+    oracle_run, base_run = present.get("oracle"), present.get("matched_base") or present.get("base")
+    if oracle_run is None or base_run is None:
+        return empty
+    oracle_stage = oracle_run["stages"][-1]
+    base_stage = find_stage(base_run, oracle_stage["stage"])
+    if base_stage is None:
+        return empty
+    return {
+        "config": oracle_stage["stage"],
+        "base": round(base_stage["final"]["survival"], 4),
+        "oracle": round(oracle_stage["final"]["survival"], 4),
+        "gap": round(oracle_stage["final"]["survival"] - base_stage["final"]["survival"], 4),
+        "base_mean_steps": round(base_stage["final"]["mean_steps"], 2),
+        "oracle_mean_steps": round(oracle_stage["final"]["mean_steps"], 2),
+        "mean_steps_gap": round(
+            oracle_stage["final"]["mean_steps"] - base_stage["final"]["mean_steps"], 2
+        ),
+        "timesteps": oracle_stage["timesteps"],
+        "note": "a lower bound: PROJECT.md 6.4 — the Oracle exposes nodes and SPRINTER's stage, "
+        "but not immune_until_tick or the pending attack tick",
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """Score everything on one seed set and write the summary."""
     args = parse_args(argv)
@@ -208,17 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     error6 = policy6["standard_error"]
     sigma6 = float("inf") if error6 == 0 else (policy6["survival"] - rhythm6) / error6
 
-    oracle_gap: dict[str, Any] = {"config": None, "base": None, "oracle": None, "gap": None}
-    if present.get("oracle") and present.get("matched_base"):
-        arm = present["oracle"]["stages"][-1]["final"]["survival"]
-        base_arm = present["matched_base"]["stages"][-1]["final"]["survival"]
-        oracle_gap = {
-            "config": present["oracle"]["stages"][-1]["stage"],
-            "base": round(base_arm, 4),
-            "oracle": round(arm, 4),
-            "gap": round(arm - base_arm, 4),
-            "note": "a lower bound: PROJECT.md 6.4",
-        }
+    oracle_gap = oracle_gap_criterion(present)
 
     summary = {
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
